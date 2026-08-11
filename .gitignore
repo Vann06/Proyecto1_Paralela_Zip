@@ -1,2 +1,38 @@
-instructions.md
+# Configuracion local de editores
+.vscode/
+.idea/
+
+# Directorios de compilacion
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+
+# Archivos generados por CMake
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Ejecutables y bibliotecas compiladas
 visor
+visor.exe
+*.exe
+*.out
+*.dll
+*.a
+*.lib
+*.pdb
+
+# Objetos generados por GCC/Clang
+# No ignorar *.obj: cow.obj es un recurso 3D del proyecto.
+*.o
+
+# Archivos temporales y del sistema operativo
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# Archivos locales que no forman parte del proyecto
+instructions.md
