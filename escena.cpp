@@ -89,6 +89,13 @@ void crearEscena(Escena& e, int n,
         ins.velGiro = rng.entre(20.0f, 70.0f) * (rng.entre(0.0f, 1.0f) < 0.5f ? -1.0f : 1.0f);
         ins.escala  = escalaBase * rng.entre(0.85f, 1.0f);
 
+        //vaca
+        float rapidez = rng.entre(0.5f, 1.5f);
+        float angulo = rng.entre(0.0f, 2.0f * 3.14159f);
+        ins.vx = rapidez* std::cos(angulo);
+        ins.vy = rapidez * std::sin(angulo);
+
+
         desdeTono(rng.entre(0.0f, 1.0f), ins.r, ins.g, ins.b);
 
         e.vacas.push_back(ins);
@@ -100,8 +107,29 @@ void actualizarEscena(Escena& e, float dt) {
     // '#pragma omp parallel for' en la version paralela.
     for (size_t i = 0; i < e.vacas.size(); ++i) {
         Instancia& v = e.vacas[i];
+
         v.giro += v.velGiro * dt;
         if (v.giro >= 360.0f) v.giro -= 360.0f;
         if (v.giro < 0.0f)    v.giro += 360.0f;
+
+        //rebote bordes vacas
+        v.x += v.vx*dt;
+        v.y += v.vy*dt;
+
+        if (v.x > e.mitadAncho){
+            v.x = e.mitadAncho;
+            v.vx = -v.vx;
+        } else if (v.x < -e.mitadAncho) {
+            v.x = -e.mitadAncho;
+            v.vx = -v.vx;
+        }
+
+        if(v.y > e.mitadAlto){
+            v.y = e.mitadAlto;
+            v.vy = -v.vy;
+        }else if (v.y < -e.mitadAlto){
+            v.y = -e.mitadAlto;
+            v.vy = -v.vy;
+        }
     }
 }

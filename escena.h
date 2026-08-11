@@ -16,6 +16,10 @@ struct Instancia {
     float velGiro = 0.0f;       // grados por segundo
     float escala = 1.0f;        // el modelo llega normalizado a tamano 2
     float r = 1.0f, g = 1.0f, b = 1.0f;
+
+    //velocidade vacas
+    float vx = 0.0f;
+    float vy = 0.0f;
 };
 
 struct Escena {
