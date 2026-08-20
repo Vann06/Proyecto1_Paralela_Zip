@@ -1,4 +1,4 @@
-#include "escena.h"
+#include "zipzip/simulation/scene.h"
 
 #include <cmath>
 #include <cstdint>

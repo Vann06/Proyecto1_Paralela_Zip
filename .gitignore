@@ -14,8 +14,11 @@ cmake_install.cmake
 compile_commands.json
 
 # Ejecutables y bibliotecas compiladas
-visor
-visor.exe
+# Nombres actual y anterior del ejecutable del proyecto
+/zipzip
+/zipzip.exe
+/visor
+/visor.exe
 *.exe
 *.out
 *.dll

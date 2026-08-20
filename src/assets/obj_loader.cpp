@@ -1,4 +1,4 @@
-#include "obj_loader.h"
+#include "zipzip/assets/obj_loader.h"
 
 #include <cmath>
 #include <cstdlib>
