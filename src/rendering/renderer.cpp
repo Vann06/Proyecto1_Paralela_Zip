@@ -243,7 +243,52 @@ void Renderer::dibujar(const Modelo& modelo, const Escena& escena,
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     dibujarEstrellas(campo);
+    dibujarPlanetas(escena);
     dibujarVacas(modelo, escena);
     dibujarHUD(fps, static_cast<int>(escena.vacas.size()),
                static_cast<int>(campo.estrellas.size()));
+}
+
+void Renderer::dibujarPlanetas(const Escena& escena) {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glLoadIdentity();
+    glTranslatef(0.0f, 0.0f, -DIST_CAM);
+
+    for (const Planeta& p : escena.planetas) {
+        glPushMatrix();
+        //fondo
+        glTranslatef(p.x, p.y, -2.0f);
+        glScalef(p.escala, p.escala, p.escala);
+        
+        glColor4f(p.r, p.g, p.b, 0.6f);
+        
+        const int segmentos = 12;
+        glBegin(GL_QUADS);
+        for (int i = 0; i < segmentos; ++i) {
+            float theta1 = (2.0f * PI * i) / segmentos;
+            float theta2 = (2.0f * PI * (i + 1)) / segmentos;
+            
+            for (int j = 0; j < segmentos / 2; ++j) {
+                float phi1 = (PI * j) / (segmentos / 2);
+                float phi2 = (PI * (j + 1)) / (segmentos / 2);
+                
+                glVertex3f(sin(phi1) * cos(theta1), sin(phi1) * sin(theta1), cos(phi1));
+                glVertex3f(sin(phi1) * cos(theta2), sin(phi1) * sin(theta2), cos(phi1));
+                glVertex3f(sin(phi2) * cos(theta2), sin(phi2) * sin(theta2), cos(phi2));
+                glVertex3f(sin(phi2) * cos(theta1), sin(phi2) * sin(theta1), cos(phi2));
+            }
+        }
+        glEnd();
+        
+        glPopMatrix();
+    }
+
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    if (culling_) glEnable(GL_CULL_FACE);
 }

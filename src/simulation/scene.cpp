@@ -100,6 +100,44 @@ void crearEscena(Escena& e, int n,
 
         e.vacas.push_back(ins);
     }
+
+    constexpr float PI = 3.14159265358979323846f;
+    const int NUM_PLANETAS = 5;
+
+    e.planetas.clear();
+    e.planetas.reserve(NUM_PLANETAS);
+
+    struct ColorPlaneta {
+        float r, g, b;
+    };
+    
+    const ColorPlaneta coloresPlanetas[] = {
+        {0.35f, 0.25f, 0.45f},  //morado
+        {0.45f, 0.30f, 0.20f},  //cafe
+        {0.20f, 0.40f, 0.45f},  //azul verdoso
+        {0.50f, 0.35f, 0.15f},  //naranja
+        {0.15f, 0.35f, 0.30f}   //verde
+    };
+
+    Rng rngPlanetas(semilla + 999);
+
+    for (int i = 0; i < NUM_PLANETAS; ++i) {
+        Planeta p;
+        //pos. planetas
+        p.x = rngPlanetas.entre(-mitadAncho * 0.85f, mitadAncho * 0.85f);
+        p.y = rngPlanetas.entre(-mitadAlto * 0.85f, mitadAlto * 0.85f);
+        
+        //tamaños
+        p.escala = rngPlanetas.entre(0.20f, 0.50f);
+        
+        int idx = i % 5;
+        p.r = coloresPlanetas[idx].r;
+        p.g = coloresPlanetas[idx].g;
+        p.b = coloresPlanetas[idx].b;
+        
+        e.planetas.push_back(p);
+    }
+
 }
 
 void actualizarEscena(Escena& e, float dt) {

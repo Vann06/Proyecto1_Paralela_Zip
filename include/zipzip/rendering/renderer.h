@@ -23,6 +23,8 @@ public:
     void dibujar(const Modelo& modelo, const Escena& escena,
                  const CampoEstrellas& campo, float fps);
 
+    void dibujarPlanetas(const Escena& escena);
+
 private:
     void configurarProyeccion();
     void dibujarEstrellas(const CampoEstrellas& campo);

@@ -22,6 +22,16 @@ struct Instancia {
     float vy = 0.0f;
 };
 
+//planetas
+struct Planeta{
+    //pos
+    float x, y;
+    //tamaño
+    float escala;
+    //colores y otros
+    float r,g,b;
+};
+
 struct Escena {
     std::vector<Instancia> vacas;
 
@@ -29,6 +39,9 @@ struct Escena {
     // y sirve para repartir las instancias y, mas adelante, para rebotar.
     float mitadAncho = 1.0f;
     float mitadAlto  = 1.0f;
+
+    std::vector<Planeta> planetas;
+
 };
 
 // Reparte 'n' instancias sobre el area visible usando una grilla con jitter:
