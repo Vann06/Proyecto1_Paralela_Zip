@@ -126,6 +126,10 @@ void crearEscena(Escena& e, int n,
         float r;
         float g;
         float b;
+        float velocidadX;
+        float giroInicial;
+        float velocidadGiro;
+        bool tieneAro;
         float inclinacionAro;
         float rotacionAro;
     };
@@ -134,10 +138,14 @@ void crearEscena(Escena& e, int n,
     // z = 0. Estos factores colocan los planetas cerca de las cuatro esquinas
     // sin recortarlos ni invadir la plataforma central.
     constexpr ConfiguracionPlaneta configuraciones[NUM_PLANETAS] = {
-        {-1.12f,  1.22f, 0.40f, 0.55f, 0.34f, 0.78f, 64.0f, -18.0f},
-        { 1.12f,  1.22f, 0.35f, 0.28f, 0.62f, 0.88f, 58.0f,  24.0f},
-        {-1.12f, -1.22f, 0.34f, 0.82f, 0.42f, 0.20f, 67.0f,  16.0f},
-        { 1.12f, -1.22f, 0.38f, 0.34f, 0.72f, 0.48f, 61.0f, -26.0f},
+        {-1.12f,  1.22f, 0.40f, 0.55f, 0.34f, 0.78f,
+          0.28f,  15.0f,  9.0f, true,  64.0f, -18.0f},
+        { 1.12f,  0.92f, 0.35f, 0.28f, 0.62f, 0.88f,
+         -0.36f, 130.0f, 14.0f, false, 58.0f,  24.0f},
+        {-1.12f,  0.05f, 0.34f, 0.82f, 0.42f, 0.20f,
+          0.44f, 245.0f, 20.0f, true,  67.0f,  16.0f},
+        { 1.12f,  0.38f, 0.38f, 0.34f, 0.72f, 0.48f,
+         -0.31f, 310.0f, 11.0f, false, 61.0f, -26.0f},
     };
 
     for (int i = 0; i < NUM_PLANETAS; ++i) {
@@ -150,6 +158,10 @@ void crearEscena(Escena& e, int n,
         p.g = config.g;
         p.b = config.b;
         p.textura = i;
+        p.vx = config.velocidadX;
+        p.giro = config.giroInicial;
+        p.velGiro = config.velocidadGiro;
+        p.tieneAro = config.tieneAro;
         p.inclinacionAro = config.inclinacionAro;
         p.rotacionAro = config.rotacionAro;
         e.planetas.push_back(p);
@@ -202,5 +214,19 @@ void actualizarEscena(Escena& e, float dt) {
             v.x *= ajuste;
             v.y *= ajuste;
         }
+    }
+
+    // Los planetas recorren carriles horizontales detras de la plataforma.
+    // El limite considera la perspectiva de z = -2 y el radio exterior del
+    // aro para que cada planeta desaparezca por completo antes de reaparecer.
+    for (Planeta& planeta : e.planetas) {
+        planeta.x += planeta.vx * dt;
+        planeta.giro += planeta.velGiro * dt;
+        if (planeta.giro >= 360.0f) planeta.giro -= 360.0f;
+
+        const float limite =
+            e.mitadAncho * 1.50f + planeta.escala * 1.80f;
+        if (planeta.x > limite) planeta.x = -limite;
+        if (planeta.x < -limite) planeta.x = limite;
     }
 }

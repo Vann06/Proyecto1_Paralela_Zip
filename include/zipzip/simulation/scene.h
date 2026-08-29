@@ -30,6 +30,10 @@ struct Planeta {
     float g = 1.0f;
     float b = 1.0f;
     int textura = 0;
+    float vx = 0.0f;
+    float giro = 0.0f;
+    float velGiro = 0.0f;
+    bool tieneAro = false;
     float inclinacionAro = 60.0f;
     float rotacionAro = 0.0f;
 };
@@ -56,7 +60,7 @@ void crearEscena(Escena& e, int n,
                  float mitadAncho, float mitadAlto,
                  unsigned semilla = 1234u);
 
-// Avanza movimiento y giro, y refleja cada vaca en los lados del rombo.
+// Avanza vacas y planetas; las vacas se reflejan en los lados del rombo.
 void actualizarEscena(Escena& e, float dt);
 
 #endif // ESCENA_H

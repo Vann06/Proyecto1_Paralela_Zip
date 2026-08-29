@@ -78,24 +78,17 @@ unsigned char convertirCanal(float valor) {
     return static_cast<unsigned char>(ajustado * 255.0f + 0.5f);
 }
 
+float transicionSuave(float borde0, float borde1, float valor) {
+    const float t = std::clamp(
+        (valor - borde0) / (borde1 - borde0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 std::vector<unsigned char> generarTexturaPlaneta(int estilo) {
     constexpr int ANCHO_TEXTURA = 96;
     constexpr int ALTO_TEXTURA = 48;
-    constexpr float OSCUROS[4][3] = {
-        {0.16f, 0.07f, 0.25f},
-        {0.03f, 0.20f, 0.35f},
-        {0.34f, 0.10f, 0.04f},
-        {0.05f, 0.24f, 0.13f},
-    };
-    constexpr float CLAROS[4][3] = {
-        {0.78f, 0.45f, 0.92f},
-        {0.25f, 0.78f, 0.96f},
-        {0.96f, 0.58f, 0.18f},
-        {0.32f, 0.88f, 0.56f},
-    };
 
     const int indice = std::clamp(estilo, 0, 3);
-    const float indiceF = static_cast<float>(indice);
     std::vector<unsigned char> pixeles(
         static_cast<size_t>(ANCHO_TEXTURA * ALTO_TEXTURA * 3));
 
@@ -105,30 +98,80 @@ std::vector<unsigned char> generarTexturaPlaneta(int estilo) {
         for (int x = 0; x < ANCHO_TEXTURA; ++x) {
             const float u = (static_cast<float>(x) + 0.5f) /
                             static_cast<float>(ANCHO_TEXTURA);
-            const float onda = std::sin(
-                2.0f * PI * (v * (7.0f + static_cast<float>(indice)) +
-                0.08f * std::sin(2.0f * PI * u * (2.0f + indiceF))));
-            const float detalle = std::sin(
-                2.0f * PI * (u * (5.0f + indiceF) + v * 3.0f));
-            const float manchas = std::pow(std::max(
-                0.0f,
-                std::sin(2.0f * PI * (u * 3.0f + 0.17f * indiceF)) *
-                std::cos(2.0f * PI * (v * 4.0f - 0.11f * indiceF))), 4.0f);
-            const float mezcla = std::clamp(
-                0.48f + 0.30f * onda + 0.10f * detalle - 0.18f * manchas,
-                0.0f, 1.0f);
+            float r = 0.0f;
+            float g = 0.0f;
+            float b = 0.0f;
+
+            if (indice == 0) {
+                // Mundo nebuloso: remolinos violetas con filamentos turquesa.
+                const float remolino = 0.5f + 0.5f * std::sin(
+                    2.0f * PI * (v * 5.0f +
+                    0.20f * std::sin(2.0f * PI * u * 2.0f) +
+                    0.05f * std::sin(2.0f * PI * (u * 7.0f - v * 3.0f))));
+                const float filamento = std::pow(std::max(
+                    0.0f, std::sin(2.0f * PI * (u * 3.0f + v * 4.0f))),
+                    6.0f);
+                r = 0.10f + 0.58f * remolino + 0.12f * filamento;
+                g = 0.03f + 0.18f * remolino + 0.55f * filamento;
+                b = 0.22f + 0.68f * remolino;
+            } else if (indice == 1) {
+                // Mundo oceanico: continentes, nubes y casquetes polares.
+                const float relieve =
+                    0.50f + 0.22f * std::sin(2.0f * PI * u * 2.0f) +
+                    0.18f * std::cos(2.0f * PI * (u * 5.0f + v * 3.0f)) +
+                    0.12f * std::sin(2.0f * PI * (u * 7.0f - v * 2.0f));
+                const float tierra = transicionSuave(0.48f, 0.62f, relieve);
+                const float nubes = 0.55f * std::pow(std::max(
+                    0.0f,
+                    std::sin(2.0f * PI * (u * 4.0f + v * 3.0f +
+                    0.10f * std::sin(2.0f * PI * v * 5.0f)))), 8.0f);
+                const float hielo = transicionSuave(
+                    0.72f, 0.94f, std::fabs(2.0f * v - 1.0f));
+                r = 0.02f + 0.10f * (1.0f - tierra) + 0.26f * tierra;
+                g = 0.16f + 0.35f * (1.0f - tierra) + 0.38f * tierra;
+                b = 0.34f + 0.48f * (1.0f - tierra) - 0.22f * tierra;
+                r += nubes + 0.75f * hielo;
+                g += nubes + 0.78f * hielo;
+                b += nubes + 0.82f * hielo;
+            } else if (indice == 2) {
+                // Mundo volcanico: corteza oscura atravesada por lava.
+                const float grietaA = std::fabs(std::sin(
+                    2.0f * PI * (u * 3.0f +
+                    0.18f * std::sin(2.0f * PI * v * 2.0f))));
+                const float grietaB = std::fabs(std::cos(
+                    2.0f * PI * (v * 4.0f +
+                    0.14f * std::sin(2.0f * PI * u * 3.0f))));
+                const float lava = 1.0f - std::clamp(
+                    std::min(grietaA, grietaB) * 13.0f, 0.0f, 1.0f);
+                const float roca = 0.5f + 0.5f * std::sin(
+                    2.0f * PI * (u * 6.0f + v * 5.0f));
+                r = 0.09f + 0.20f * roca + 0.91f * lava;
+                g = 0.025f + 0.045f * roca + 0.48f * lava;
+                b = 0.015f + 0.025f * roca + 0.04f * lava;
+            } else {
+                // Gigante gaseoso: bandas verdes y una tormenta brillante.
+                const float bandas = 0.5f + 0.5f * std::sin(
+                    2.0f * PI * (v * 11.0f +
+                    0.09f * std::sin(2.0f * PI * u * 3.0f)));
+                const float distanciaU = std::min(
+                    std::fabs(u - 0.68f), 1.0f - std::fabs(u - 0.68f));
+                const float distanciaV = v - 0.58f;
+                const float tormenta = std::exp(
+                    -(distanciaU * distanciaU / 0.010f +
+                      distanciaV * distanciaV / 0.0035f));
+                r = 0.03f + 0.17f * bandas + 0.62f * tormenta;
+                g = 0.18f + 0.55f * bandas + 0.28f * tormenta;
+                b = 0.16f + 0.32f * bandas + 0.20f * tormenta;
+            }
+
             const float iluminacionPolar =
-                0.82f + 0.18f * std::sin(PI * v);
+                0.78f + 0.22f * std::sin(PI * v);
 
             const size_t posicion = static_cast<size_t>(
                 (y * ANCHO_TEXTURA + x) * 3);
-            for (int canal = 0; canal < 3; ++canal) {
-                const float color =
-                    OSCUROS[indice][canal] +
-                    (CLAROS[indice][canal] - OSCUROS[indice][canal]) * mezcla;
-                pixeles[posicion + static_cast<size_t>(canal)] =
-                    convertirCanal(color * iluminacionPolar);
-            }
+            pixeles[posicion] = convertirCanal(r * iluminacionPolar);
+            pixeles[posicion + 1u] = convertirCanal(g * iluminacionPolar);
+            pixeles[posicion + 2u] = convertirCanal(b * iluminacionPolar);
         }
     }
 
@@ -493,6 +536,10 @@ void Renderer::dibujarPlanetas(const Escena& escena) {
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
         glColor4f(1.0f, 1.0f, 1.0f, 0.98f);
 
+        // La esfera gira sobre su eje Y; al rotar la geometria también rota
+        // el mapa UV y el movimiento de la textura se vuelve visible.
+        glPushMatrix();
+        glRotatef(p.giro, 0.0f, 1.0f, 0.0f);
         glBegin(GL_QUADS);
         for (int i = 0; i < SEGMENTOS; ++i) {
             const float u1 = static_cast<float>(i) /
@@ -527,30 +574,35 @@ void Renderer::dibujarPlanetas(const Escena& escena) {
             }
         }
         glEnd();
+        glPopMatrix();
 
         glBindTexture(GL_TEXTURE_2D, 0);
         glDisable(GL_TEXTURE_2D);
 
-        // El aro se dibuja en un plano inclinado. La prueba de profundidad
-        // oculta la parte posterior cuando pasa detras de la esfera.
-        glRotatef(p.rotacionAro, 0.0f, 0.0f, 1.0f);
-        glRotatef(p.inclinacionAro, 1.0f, 0.0f, 0.0f);
-        glBegin(GL_QUAD_STRIP);
-        for (int i = 0; i <= SEGMENTOS_ARO; ++i) {
-            const float angulo = 2.0f * PI *
-                static_cast<float>(i) / static_cast<float>(SEGMENTOS_ARO);
-            const float coseno = std::cos(angulo);
-            const float seno = std::sin(angulo);
-            const float pulso = 0.72f + 0.28f * std::sin(angulo * 5.0f);
+        if (p.tieneAro) {
+            // Solo dos planetas poseen aro. La prueba de profundidad oculta
+            // su mitad posterior cuando pasa detras de la esfera.
+            glRotatef(p.rotacionAro, 0.0f, 0.0f, 1.0f);
+            glRotatef(p.inclinacionAro, 1.0f, 0.0f, 0.0f);
+            glBegin(GL_QUAD_STRIP);
+            for (int i = 0; i <= SEGMENTOS_ARO; ++i) {
+                const float angulo = 2.0f * PI *
+                    static_cast<float>(i) /
+                    static_cast<float>(SEGMENTOS_ARO);
+                const float coseno = std::cos(angulo);
+                const float seno = std::sin(angulo);
+                const float pulso =
+                    0.72f + 0.28f * std::sin(angulo * 5.0f);
 
-            glColor4f(p.r * pulso, p.g * pulso, p.b * pulso, 0.18f);
-            glVertex3f(1.18f * coseno, 1.18f * seno, 0.0f);
-            glColor4f(std::min(1.0f, p.r * 1.45f),
-                      std::min(1.0f, p.g * 1.45f),
-                      std::min(1.0f, p.b * 1.45f), 0.62f);
-            glVertex3f(1.72f * coseno, 1.72f * seno, 0.0f);
+                glColor4f(p.r * pulso, p.g * pulso, p.b * pulso, 0.18f);
+                glVertex3f(1.18f * coseno, 1.18f * seno, 0.0f);
+                glColor4f(std::min(1.0f, p.r * 1.45f),
+                          std::min(1.0f, p.g * 1.45f),
+                          std::min(1.0f, p.b * 1.45f), 0.62f);
+                glVertex3f(1.72f * coseno, 1.72f * seno, 0.0f);
+            }
+            glEnd();
         }
-        glEnd();
 
         glPopMatrix();
     }
