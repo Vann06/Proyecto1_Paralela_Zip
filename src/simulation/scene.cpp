@@ -101,7 +101,7 @@ void crearEscena(Escena& e, int n,
         e.vacas.push_back(ins);
     }
 
-    constexpr float PI = 3.14159265358979323846f;
+    //constexpr float PI = 3.14159265358979323846f;
     const int NUM_PLANETAS = 5;
 
     e.planetas.clear();

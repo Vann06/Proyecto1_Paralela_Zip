@@ -168,6 +168,98 @@ void Renderer::dibujarEstrellas(const CampoEstrellas& campo) {
     if (wireframe_) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 }
 
+void Renderer::dibujarPlataforma(const Escena& escena) {
+    glDisable(GL_LIGHTING);
+
+    glLoadIdentity();
+    glTranslatef(0.0f, 0.0f, -DIST_CAM);
+
+    // Tamaño general del bloque
+    const float ancho = escena.mitadAncho * 0.85f;
+    const float alto  = escena.mitadAlto  * 0.60f;
+    const float caida = escena.mitadAlto  * 0.98f;
+
+    // ============================
+    // VERTICES DE LA CARA SUPERIOR
+    // (rombo / punta hacia arriba)
+    // ============================
+
+    const float xTop    = 0.0f;
+    const float yTop    =  alto;
+    const float zTop    = -0.68f;
+
+    const float xRight  =  ancho;
+    const float yRight  =  0.0f;
+    const float zRight  = -0.42f;
+
+    const float xBottom =  0.0f;
+    const float yBottom = -alto;
+    const float zBottom = -0.18f;
+
+    const float xLeft   = -ancho;
+    const float yLeft   =  0.0f;
+    const float zLeft   = -0.42f;
+
+    // ============================
+    // VERTICES INFERIORES
+    // para las caras laterales
+    // ============================
+
+    const float xLowerRight  =  ancho;
+    const float yLowerRight  = -caida;
+    const float zLowerRight  = -0.42f;
+
+    const float xLowerBottom =  0.0f;
+    const float yLowerBottom = -(caida + alto);
+    const float zLowerBottom = -0.18f;
+
+    const float xLowerLeft   = -ancho;
+    const float yLowerLeft   = -caida;
+    const float zLowerLeft   = -0.42f;
+
+    // ============================
+    // CARA SUPERIOR
+    // ============================
+
+    glBegin(GL_QUADS);
+    glColor3f(0.72f, 0.95f, 0.08f);
+    glVertex3f(xTop,    yTop,    zTop);
+    glVertex3f(xRight,  yRight,  zRight);
+    glVertex3f(xBottom, yBottom, zBottom);
+    glVertex3f(xLeft,   yLeft,   zLeft);
+    glEnd();
+
+    // ============================
+    // CARA IZQUIERDA
+    // ============================
+
+    glBegin(GL_QUADS);
+    glColor3f(0.52f, 0.78f, 0.08f);
+    glVertex3f(xLeft,        yLeft,        zLeft);
+    glVertex3f(xBottom,      yBottom,      zBottom);
+
+    glColor3f(0.28f, 0.52f, 0.10f);
+    glVertex3f(xLowerBottom, yLowerBottom, zLowerBottom);
+    glVertex3f(xLowerLeft,   yLowerLeft,   zLowerLeft);
+    glEnd();
+
+    // ============================
+    // CARA DERECHA
+    // ============================
+
+    glBegin(GL_QUADS);
+    glColor3f(0.60f, 0.84f, 0.10f);
+    glVertex3f(xBottom,      yBottom,      zBottom);
+    glVertex3f(xRight,       yRight,       zRight);
+
+    glColor3f(0.32f, 0.58f, 0.12f);
+    glVertex3f(xLowerRight,  yLowerRight,  zLowerRight);
+    glVertex3f(xLowerBottom, yLowerBottom, zLowerBottom);
+    glEnd();
+
+    glEnable(GL_LIGHTING);
+}
+
 void Renderer::dibujarVacas(const Modelo& modelo, const Escena& escena) {
     glLoadIdentity();
     glTranslatef(0.0f, 0.0f, -DIST_CAM);
@@ -244,6 +336,7 @@ void Renderer::dibujar(const Modelo& modelo, const Escena& escena,
 
     dibujarEstrellas(campo);
     dibujarPlanetas(escena);
+    dibujarPlataforma(escena);
     dibujarVacas(modelo, escena);
     dibujarHUD(fps, static_cast<int>(escena.vacas.size()),
                static_cast<int>(campo.estrellas.size()));

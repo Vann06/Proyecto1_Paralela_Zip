@@ -28,6 +28,7 @@ public:
 private:
     void configurarProyeccion();
     void dibujarEstrellas(const CampoEstrellas& campo);
+    void dibujarPlataforma(const Escena& escena);
     void dibujarVacas(const Modelo& modelo, const Escena& escena);
     void dibujarHUD(float fps, int vacas, int estrellas);
 
