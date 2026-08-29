@@ -16,8 +16,23 @@ struct Estrella {
     float brillo = 1.0f;
 };
 
+struct EstrellaFugaz {
+    float x = 0.0f;
+    float y = 0.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+    float longitud = 0.6f;
+    float brillo = 1.0f;
+    float edad = 0.0f;
+    float duracion = 1.0f;
+    float espera = 0.0f;
+    unsigned estado = 1u;
+    bool activa = false;
+};
+
 struct CampoEstrellas {
     std::vector<Estrella> estrellas;
+    std::vector<EstrellaFugaz> fugaces;
     float mitadAncho = 1.0f;
     float mitadAlto = 1.0f;
     float tiempo = 0.0f;
@@ -28,7 +43,7 @@ void crearCampoEstrellas(CampoEstrellas& campo, int cantidad,
                          float mitadAncho, float mitadAlto,
                          unsigned semilla = 4321u);
 
-// Mueve las estrellas lentamente, actualiza su brillo y las envuelve en bordes.
+// Mueve las estrellas, actualiza su brillo y anima las estrellas fugaces.
 void actualizarCampoEstrellas(CampoEstrellas& campo, float dt);
 
 #endif // ZIPZIP_SIMULATION_STARFIELD_H

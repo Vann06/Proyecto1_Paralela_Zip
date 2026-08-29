@@ -27,6 +27,7 @@ public:
 
 private:
     void configurarProyeccion();
+    void prepararTexturasPlanetas();
     void dibujarEstrellas(const CampoEstrellas& campo);
     void dibujarPlataforma(const Escena& escena);
     void dibujarVacas(const Modelo& modelo, const Escena& escena);
@@ -36,6 +37,8 @@ private:
     int alto_;
     bool wireframe_ = false;
     bool culling_ = false;
+    unsigned int texturasPlanetas_[4] = {};
+    bool texturasPlanetasPreparadas_ = false;
 };
 
 #endif // ZIPZIP_RENDERING_RENDERER_H

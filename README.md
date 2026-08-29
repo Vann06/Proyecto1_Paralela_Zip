@@ -26,7 +26,9 @@ Avances 1 :
 - Cantidad configurable de vacas; el valor predeterminado es 20.
 - Estado de las vacas almacenado en `std::vector<Instancia>`.
 - Posicion, velocidad, giro, escala y color por vaca.
-- Movimiento con velocidad pseudoaleatoria y rebote contra los limites.
+- Movimiento con velocidad pseudoaleatoria y rebote vectorial en el rombo.
+- Cuatro planetas con texturas procedurales y aros, ubicados en las esquinas.
+- Campo de estrellas distribuido en todo el frame y estrellas fugaces animadas.
 - HUD con FPS y cantidad de vacas.
 - Pausa, wireframe, face culling y control de VSync.
 

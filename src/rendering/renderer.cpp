@@ -2,8 +2,10 @@
 
 #include <SDL2/SDL_opengl.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -71,6 +73,68 @@ void dibujarTexto(const char* texto, float x, float y, float punto) {
     glEnd();
 }
 
+unsigned char convertirCanal(float valor) {
+    const float ajustado = std::clamp(valor, 0.0f, 1.0f);
+    return static_cast<unsigned char>(ajustado * 255.0f + 0.5f);
+}
+
+std::vector<unsigned char> generarTexturaPlaneta(int estilo) {
+    constexpr int ANCHO_TEXTURA = 96;
+    constexpr int ALTO_TEXTURA = 48;
+    constexpr float OSCUROS[4][3] = {
+        {0.16f, 0.07f, 0.25f},
+        {0.03f, 0.20f, 0.35f},
+        {0.34f, 0.10f, 0.04f},
+        {0.05f, 0.24f, 0.13f},
+    };
+    constexpr float CLAROS[4][3] = {
+        {0.78f, 0.45f, 0.92f},
+        {0.25f, 0.78f, 0.96f},
+        {0.96f, 0.58f, 0.18f},
+        {0.32f, 0.88f, 0.56f},
+    };
+
+    const int indice = std::clamp(estilo, 0, 3);
+    const float indiceF = static_cast<float>(indice);
+    std::vector<unsigned char> pixeles(
+        static_cast<size_t>(ANCHO_TEXTURA * ALTO_TEXTURA * 3));
+
+    for (int y = 0; y < ALTO_TEXTURA; ++y) {
+        const float v = (static_cast<float>(y) + 0.5f) /
+                        static_cast<float>(ALTO_TEXTURA);
+        for (int x = 0; x < ANCHO_TEXTURA; ++x) {
+            const float u = (static_cast<float>(x) + 0.5f) /
+                            static_cast<float>(ANCHO_TEXTURA);
+            const float onda = std::sin(
+                2.0f * PI * (v * (7.0f + static_cast<float>(indice)) +
+                0.08f * std::sin(2.0f * PI * u * (2.0f + indiceF))));
+            const float detalle = std::sin(
+                2.0f * PI * (u * (5.0f + indiceF) + v * 3.0f));
+            const float manchas = std::pow(std::max(
+                0.0f,
+                std::sin(2.0f * PI * (u * 3.0f + 0.17f * indiceF)) *
+                std::cos(2.0f * PI * (v * 4.0f - 0.11f * indiceF))), 4.0f);
+            const float mezcla = std::clamp(
+                0.48f + 0.30f * onda + 0.10f * detalle - 0.18f * manchas,
+                0.0f, 1.0f);
+            const float iluminacionPolar =
+                0.82f + 0.18f * std::sin(PI * v);
+
+            const size_t posicion = static_cast<size_t>(
+                (y * ANCHO_TEXTURA + x) * 3);
+            for (int canal = 0; canal < 3; ++canal) {
+                const float color =
+                    OSCUROS[indice][canal] +
+                    (CLAROS[indice][canal] - OSCUROS[indice][canal]) * mezcla;
+                pixeles[posicion + static_cast<size_t>(canal)] =
+                    convertirCanal(color * iluminacionPolar);
+            }
+        }
+    }
+
+    return pixeles;
+}
+
 } // namespace
 
 Renderer::Renderer(int ancho, int alto) : ancho_(ancho), alto_(alto) {}
@@ -91,7 +155,32 @@ void Renderer::inicializar() {
     glLightfv(GL_LIGHT0, GL_AMBIENT, ambiente);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, difusa);
 
+    prepararTexturasPlanetas();
     configurarProyeccion();
+}
+
+void Renderer::prepararTexturasPlanetas() {
+    if (texturasPlanetasPreparadas_) return;
+
+    constexpr int ANCHO_TEXTURA = 96;
+    constexpr int ALTO_TEXTURA = 48;
+    glGenTextures(4, texturasPlanetas_);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    for (int i = 0; i < 4; ++i) {
+        const std::vector<unsigned char> pixeles = generarTexturaPlaneta(i);
+        glBindTexture(GL_TEXTURE_2D, texturasPlanetas_[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
+                     ANCHO_TEXTURA, ALTO_TEXTURA, 0,
+                     GL_RGB, GL_UNSIGNED_BYTE, pixeles.data());
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    texturasPlanetasPreparadas_ = true;
 }
 
 void Renderer::configurarProyeccion() {
@@ -125,6 +214,12 @@ void Renderer::prepararModelo(const Modelo& modelo) {
 void Renderer::liberarModelo() {
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_NORMAL_ARRAY);
+    if (texturasPlanetasPreparadas_) {
+        glDeleteTextures(4, texturasPlanetas_);
+        std::fill(std::begin(texturasPlanetas_),
+                  std::end(texturasPlanetas_), 0u);
+        texturasPlanetasPreparadas_ = false;
+    }
 }
 
 void Renderer::alternarWireframe() {
@@ -160,7 +255,37 @@ void Renderer::dibujarEstrellas(const CampoEstrellas& campo) {
         glEnd();
     }
 
+    for (const EstrellaFugaz& fugaz : campo.fugaces) {
+        if (!fugaz.activa || fugaz.brillo <= 0.0f) continue;
+
+        const float rapidez = std::sqrt(
+            fugaz.vx * fugaz.vx + fugaz.vy * fugaz.vy);
+        if (rapidez <= 0.0f) continue;
+
+        const float colaX = fugaz.x -
+            (fugaz.vx / rapidez) * fugaz.longitud;
+        const float colaY = fugaz.y -
+            (fugaz.vy / rapidez) * fugaz.longitud;
+
+        glLineWidth(4.0f);
+        glBegin(GL_LINES);
+        glColor4f(0.45f, 0.70f, 1.0f, 0.20f * fugaz.brillo);
+        glVertex3f(colaX, colaY, -0.95f);
+        glColor4f(0.80f, 0.92f, 1.0f, 0.55f * fugaz.brillo);
+        glVertex3f(fugaz.x, fugaz.y, -0.95f);
+        glEnd();
+
+        glLineWidth(1.5f);
+        glBegin(GL_LINES);
+        glColor4f(0.55f, 0.80f, 1.0f, 0.0f);
+        glVertex3f(colaX, colaY, -0.94f);
+        glColor4f(1.0f, 1.0f, 1.0f, fugaz.brillo);
+        glVertex3f(fugaz.x, fugaz.y, -0.94f);
+        glEnd();
+    }
+
     glPointSize(1.0f);
+    glLineWidth(1.0f);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
@@ -344,44 +469,97 @@ void Renderer::dibujar(const Modelo& modelo, const Escena& escena,
 
 void Renderer::dibujarPlanetas(const Escena& escena) {
     glDisable(GL_LIGHTING);
-    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glLoadIdentity();
     glTranslatef(0.0f, 0.0f, -DIST_CAM);
 
+    constexpr int SEGMENTOS = 32;
+    constexpr int LATITUDES = 16;
+    constexpr int SEGMENTOS_ARO = 64;
+
     for (const Planeta& p : escena.planetas) {
         glPushMatrix();
-        //fondo
         glTranslatef(p.x, p.y, -2.0f);
         glScalef(p.escala, p.escala, p.escala);
-        
-        glColor4f(p.r, p.g, p.b, 0.6f);
-        
-        const int segmentos = 12;
+
+        const int textura = std::clamp(p.textura, 0, 3);
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texturasPlanetas_[textura]);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        glColor4f(1.0f, 1.0f, 1.0f, 0.98f);
+
         glBegin(GL_QUADS);
-        for (int i = 0; i < segmentos; ++i) {
-            float theta1 = (2.0f * PI * i) / segmentos;
-            float theta2 = (2.0f * PI * (i + 1)) / segmentos;
-            
-            for (int j = 0; j < segmentos / 2; ++j) {
-                float phi1 = (PI * j) / (segmentos / 2);
-                float phi2 = (PI * (j + 1)) / (segmentos / 2);
-                
-                glVertex3f(sin(phi1) * cos(theta1), sin(phi1) * sin(theta1), cos(phi1));
-                glVertex3f(sin(phi1) * cos(theta2), sin(phi1) * sin(theta2), cos(phi1));
-                glVertex3f(sin(phi2) * cos(theta2), sin(phi2) * sin(theta2), cos(phi2));
-                glVertex3f(sin(phi2) * cos(theta1), sin(phi2) * sin(theta1), cos(phi2));
+        for (int i = 0; i < SEGMENTOS; ++i) {
+            const float u1 = static_cast<float>(i) /
+                             static_cast<float>(SEGMENTOS);
+            const float u2 = static_cast<float>(i + 1) /
+                             static_cast<float>(SEGMENTOS);
+            const float theta1 = 2.0f * PI * u1;
+            const float theta2 = 2.0f * PI * u2;
+
+            for (int j = 0; j < LATITUDES; ++j) {
+                const float v1 = static_cast<float>(j) /
+                                 static_cast<float>(LATITUDES);
+                const float v2 = static_cast<float>(j + 1) /
+                                 static_cast<float>(LATITUDES);
+                const float phi1 = PI * v1;
+                const float phi2 = PI * v2;
+                const float radio1 = std::sin(phi1);
+                const float radio2 = std::sin(phi2);
+
+                glTexCoord2f(u1, v1);
+                glVertex3f(radio1 * std::cos(theta1), std::cos(phi1),
+                           radio1 * std::sin(theta1));
+                glTexCoord2f(u2, v1);
+                glVertex3f(radio1 * std::cos(theta2), std::cos(phi1),
+                           radio1 * std::sin(theta2));
+                glTexCoord2f(u2, v2);
+                glVertex3f(radio2 * std::cos(theta2), std::cos(phi2),
+                           radio2 * std::sin(theta2));
+                glTexCoord2f(u1, v2);
+                glVertex3f(radio2 * std::cos(theta1), std::cos(phi2),
+                           radio2 * std::sin(theta1));
             }
         }
         glEnd();
-        
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+
+        // El aro se dibuja en un plano inclinado. La prueba de profundidad
+        // oculta la parte posterior cuando pasa detras de la esfera.
+        glRotatef(p.rotacionAro, 0.0f, 0.0f, 1.0f);
+        glRotatef(p.inclinacionAro, 1.0f, 0.0f, 0.0f);
+        glBegin(GL_QUAD_STRIP);
+        for (int i = 0; i <= SEGMENTOS_ARO; ++i) {
+            const float angulo = 2.0f * PI *
+                static_cast<float>(i) / static_cast<float>(SEGMENTOS_ARO);
+            const float coseno = std::cos(angulo);
+            const float seno = std::sin(angulo);
+            const float pulso = 0.72f + 0.28f * std::sin(angulo * 5.0f);
+
+            glColor4f(p.r * pulso, p.g * pulso, p.b * pulso, 0.18f);
+            glVertex3f(1.18f * coseno, 1.18f * seno, 0.0f);
+            glColor4f(std::min(1.0f, p.r * 1.45f),
+                      std::min(1.0f, p.g * 1.45f),
+                      std::min(1.0f, p.b * 1.45f), 0.62f);
+            glVertex3f(1.72f * coseno, 1.72f * seno, 0.0f);
+        }
+        glEnd();
+
         glPopMatrix();
     }
 
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
     if (culling_) glEnable(GL_CULL_FACE);
+    if (wireframe_) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 }

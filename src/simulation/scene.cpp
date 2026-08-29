@@ -115,43 +115,45 @@ void crearEscena(Escena& e, int n,
         e.vacas.push_back(ins);
     }
 
-    //constexpr float PI = 3.14159265358979323846f;
-    const int NUM_PLANETAS = 5;
-
+    constexpr int NUM_PLANETAS = 4;
     e.planetas.clear();
     e.planetas.reserve(NUM_PLANETAS);
 
-    struct ColorPlaneta {
-        float r, g, b;
-    };
-    
-    const ColorPlaneta coloresPlanetas[] = {
-        {0.35f, 0.25f, 0.45f},  //morado
-        {0.45f, 0.30f, 0.20f},  //cafe
-        {0.20f, 0.40f, 0.45f},  //azul verdoso
-        {0.50f, 0.35f, 0.15f},  //naranja
-        {0.15f, 0.35f, 0.30f}   //verde
+    struct ConfiguracionPlaneta {
+        float factorX;
+        float factorY;
+        float escala;
+        float r;
+        float g;
+        float b;
+        float inclinacionAro;
+        float rotacionAro;
     };
 
-    Rng rngPlanetas(semilla + 999);
+    // A la profundidad usada por el renderer el area visible es mayor que en
+    // z = 0. Estos factores colocan los planetas cerca de las cuatro esquinas
+    // sin recortarlos ni invadir la plataforma central.
+    constexpr ConfiguracionPlaneta configuraciones[NUM_PLANETAS] = {
+        {-1.12f,  1.22f, 0.40f, 0.55f, 0.34f, 0.78f, 64.0f, -18.0f},
+        { 1.12f,  1.22f, 0.35f, 0.28f, 0.62f, 0.88f, 58.0f,  24.0f},
+        {-1.12f, -1.22f, 0.34f, 0.82f, 0.42f, 0.20f, 67.0f,  16.0f},
+        { 1.12f, -1.22f, 0.38f, 0.34f, 0.72f, 0.48f, 61.0f, -26.0f},
+    };
 
     for (int i = 0; i < NUM_PLANETAS; ++i) {
+        const ConfiguracionPlaneta& config = configuraciones[i];
         Planeta p;
-        //pos. planetas
-        p.x = rngPlanetas.entre(-mitadAncho * 0.85f, mitadAncho * 0.85f);
-        p.y = rngPlanetas.entre(-mitadAlto * 0.85f, mitadAlto * 0.85f);
-        
-        //tamaños
-        p.escala = rngPlanetas.entre(0.20f, 0.50f);
-        
-        int idx = i % 5;
-        p.r = coloresPlanetas[idx].r;
-        p.g = coloresPlanetas[idx].g;
-        p.b = coloresPlanetas[idx].b;
-        
+        p.x = mitadAncho * config.factorX;
+        p.y = mitadAlto * config.factorY;
+        p.escala = config.escala;
+        p.r = config.r;
+        p.g = config.g;
+        p.b = config.b;
+        p.textura = i;
+        p.inclinacionAro = config.inclinacionAro;
+        p.rotacionAro = config.rotacionAro;
         e.planetas.push_back(p);
     }
-
 }
 
 void actualizarEscena(Escena& e, float dt) {

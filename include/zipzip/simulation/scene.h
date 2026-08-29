@@ -22,14 +22,16 @@ struct Instancia {
     float vy = 0.0f;
 };
 
-//planetas
-struct Planeta{
-    //pos
-    float x, y;
-    //tamaño
-    float escala;
-    //colores y otros
-    float r,g,b;
+struct Planeta {
+    float x = 0.0f;
+    float y = 0.0f;
+    float escala = 1.0f;
+    float r = 1.0f;
+    float g = 1.0f;
+    float b = 1.0f;
+    int textura = 0;
+    float inclinacionAro = 60.0f;
+    float rotacionAro = 0.0f;
 };
 
 struct Escena {
