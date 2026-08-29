@@ -17,7 +17,7 @@ struct Instancia {
     float escala = 1.0f;        // el modelo llega normalizado a tamano 2
     float r = 1.0f, g = 1.0f, b = 1.0f;
 
-    //velocidade vacas
+    // Velocidad lineal de la vaca sobre la superficie del rombo.
     float vx = 0.0f;
     float vy = 0.0f;
 };
@@ -40,17 +40,21 @@ struct Escena {
     float mitadAncho = 1.0f;
     float mitadAlto  = 1.0f;
 
+    // Semiejes del rombo compartidos por simulacion y renderizado.
+    float romboAncho = 1.0f;
+    float romboAlto = 1.0f;
+
     std::vector<Planeta> planetas;
 
 };
 
-// Reparte 'n' instancias sobre el area visible usando una grilla con jitter:
-// quedan bien distribuidas y con tamano suficiente para verse todas.
+// Reparte 'n' instancias dentro del rombo. La escala se deriva de una grilla
+// virtual para que continue dependiendo de la cantidad de vacas.
 void crearEscena(Escena& e, int n,
                  float mitadAncho, float mitadAlto,
                  unsigned semilla = 1234u);
 
-// Avanza la escena 'dt' segundos. Por ahora solo gira cada instancia.
+// Avanza movimiento y giro, y refleja cada vaca en los lados del rombo.
 void actualizarEscena(Escena& e, float dt);
 
 #endif // ESCENA_H

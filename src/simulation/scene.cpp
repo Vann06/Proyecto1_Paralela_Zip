@@ -5,6 +5,10 @@
 
 namespace {
 
+constexpr float PI = 3.14159265358979323846f;
+constexpr float MARGEN_INICIAL_ROMBO = 0.78f;
+constexpr float MARGEN_REBOTE_ROMBO = 0.995f;
+
 // Generador propio en lugar de <random>: es determinista entre maquinas y
 // compiladores, asi la misma semilla da siempre la misma escena. Eso importa
 // para comparar tiempos entre la version serial y la paralela.
@@ -20,7 +24,7 @@ struct Rng {
     }
     // Real uniforme en [a, b).
     float entre(float a, float b) {
-        return a + (b - a) * (siguiente() / 4294967296.0f);
+        return a + (b - a) * (static_cast<float>(siguiente()) / 4294967296.0f);
     }
 };
 
@@ -45,6 +49,15 @@ void desdeTono(float h, float& r, float& g, float& b) {
     }
 }
 
+// En los vertices del rombo una coordenada puede ser exactamente cero. En
+// ese caso la componente de la velocidad permite escoger uno de los dos lados
+// adyacentes sin dejar la vaca oscilando entre ambas normales.
+float signoLado(float coordenada, float velocidad) {
+    if (coordenada > 0.0f) return 1.0f;
+    if (coordenada < 0.0f) return -1.0f;
+    return velocidad >= 0.0f ? 1.0f : -1.0f;
+}
+
 } // namespace anonimo
 
 void crearEscena(Escena& e, int n,
@@ -54,47 +67,48 @@ void crearEscena(Escena& e, int n,
 
     e.mitadAncho = mitadAncho;
     e.mitadAlto  = mitadAlto;
+    e.romboAncho = mitadAncho * 0.85f;
+    e.romboAlto = mitadAlto * 0.60f;
     e.vacas.clear();
     e.vacas.reserve(static_cast<size_t>(n));
 
-    // Grilla con la misma proporcion que el area visible, para que las celdas
-    // salgan lo mas cuadradas posible y no se desperdicie espacio.
+    // La grilla solo determina una escala dependiente de N. Las posiciones se
+    // generan aparte y de manera uniforme dentro del rombo.
     float aspecto = mitadAncho / mitadAlto;
-    int cols = static_cast<int>(std::ceil(std::sqrt(n * aspecto)));
+    int cols = static_cast<int>(
+        std::ceil(std::sqrt(static_cast<float>(n) * aspecto)));
     if (cols < 1) cols = 1;
     int filas = (n + cols - 1) / cols;
 
-    float anchoCelda = (2.0f * mitadAncho) / cols;
-    float altoCelda  = (2.0f * mitadAlto)  / filas;
+    float anchoCelda = (2.0f * mitadAncho) / static_cast<float>(cols);
+    float altoCelda  = (2.0f * mitadAlto)  / static_cast<float>(filas);
     float celdaMin   = std::fmin(anchoCelda, altoCelda);
 
-    // El modelo llega con su dimension mayor igual a 2. Al girar sobre Y su
-    // huella crece hasta la diagonal, por eso se deja holgura: 0.33 en vez
-    // del 0.5 que llenaria la celda por completo.
-    float escalaBase = celdaMin * 0.33f;
+    // El modelo llega con su dimension mayor igual a 2. Se usa un factor un
+    // poco menor que el original, pero la escala sigue disminuyendo con N.
+    float escalaBase = celdaMin * 0.28f;
 
     Rng rng(semilla);
 
     for (int i = 0; i < n; ++i) {
-        int col = i % cols;
-        int fila = i / cols;
-
         Instancia ins;
-        // Centro de la celda, mas un desplazamiento chico para que no se vea
-        // como una tabla perfecta.
-        ins.x = -mitadAncho + (col  + 0.5f) * anchoCelda + rng.entre(-0.18f, 0.18f) * anchoCelda;
-        ins.y = -mitadAlto  + (fila + 0.5f) * altoCelda  + rng.entre(-0.18f, 0.18f) * altoCelda;
+        // La transformacion (u + v - 1, u - v), con u y v uniformes en
+        // [0, 1), distribuye puntos uniformemente dentro del rombo unidad.
+        // El margen evita que varias vacas nazcan pegadas a los cuatro lados.
+        const float u = rng.entre(0.0f, 1.0f);
+        const float v = rng.entre(0.0f, 1.0f);
+        ins.x = (u + v - 1.0f) * e.romboAncho * MARGEN_INICIAL_ROMBO;
+        ins.y = (u - v) * e.romboAlto * MARGEN_INICIAL_ROMBO;
 
         ins.giro    = rng.entre(0.0f, 360.0f);
         ins.velGiro = rng.entre(20.0f, 70.0f) * (rng.entre(0.0f, 1.0f) < 0.5f ? -1.0f : 1.0f);
         ins.escala  = escalaBase * rng.entre(0.85f, 1.0f);
 
-        //vaca
+        // Velocidad lineal con direccion inicial libre.
         float rapidez = rng.entre(0.5f, 1.5f);
-        float angulo = rng.entre(0.0f, 2.0f * 3.14159f);
-        ins.vx = rapidez* std::cos(angulo);
+        float angulo = rng.entre(0.0f, 2.0f * PI);
+        ins.vx = rapidez * std::cos(angulo);
         ins.vy = rapidez * std::sin(angulo);
-
 
         desdeTono(rng.entre(0.0f, 1.0f), ins.r, ins.g, ins.b);
 
@@ -150,24 +164,41 @@ void actualizarEscena(Escena& e, float dt) {
         if (v.giro >= 360.0f) v.giro -= 360.0f;
         if (v.giro < 0.0f)    v.giro += 360.0f;
 
-        //rebote bordes vacas
-        v.x += v.vx*dt;
-        v.y += v.vy*dt;
+        v.x += v.vx * dt;
+        v.y += v.vy * dt;
 
-        if (v.x > e.mitadAncho){
-            v.x = e.mitadAncho;
-            v.vx = -v.vx;
-        } else if (v.x < -e.mitadAncho) {
-            v.x = -e.mitadAncho;
-            v.vx = -v.vx;
-        }
+        const float a = e.romboAncho;
+        const float b = e.romboAlto;
 
-        if(v.y > e.mitadAlto){
-            v.y = e.mitadAlto;
-            v.vy = -v.vy;
-        }else if (v.y < -e.mitadAlto){
-            v.y = -e.mitadAlto;
-            v.vy = -v.vy;
+        // Ecuacion del rombo: |x| / a + |y| / b <= 1.
+        const float distanciaRombo =
+            std::fabs(v.x) / a +
+            std::fabs(v.y) / b;
+
+        if (distanciaRombo > 1.0f) {
+            float nx = signoLado(v.x, v.vx) / a;
+            float ny = signoLado(v.y, v.vy) / b;
+
+            // Normal unitaria hacia afuera del lado alcanzado.
+            const float longitud = std::sqrt(nx * nx + ny * ny);
+            nx /= longitud;
+            ny /= longitud;
+
+            const float producto = v.vx * nx + v.vy * ny;
+
+            // Solo se refleja si la vaca todavia se dirige hacia afuera. La
+            // condicion contraria provocaba que se recolocara cada frame sin
+            // cambiar su trayectoria, produciendo vibracion en los bordes.
+            if (producto > 0.0f) {
+                v.vx -= 2.0f * producto * nx;
+                v.vy -= 2.0f * producto * ny;
+            }
+
+            // Proyeccion radial a un punto apenas interior. El margen evita
+            // detectar de nuevo el mismo choque por error de punto flotante.
+            const float ajuste = MARGEN_REBOTE_ROMBO / distanciaRombo;
+            v.x *= ajuste;
+            v.y *= ajuste;
         }
     }
 }

@@ -175,8 +175,8 @@ void Renderer::dibujarPlataforma(const Escena& escena) {
     glTranslatef(0.0f, 0.0f, -DIST_CAM);
 
     // Tamaño general del bloque
-    const float ancho = escena.mitadAncho * 0.85f;
-    const float alto  = escena.mitadAlto  * 0.60f;
+    const float ancho = escena.romboAncho;
+    const float alto  = escena.romboAlto;
     const float caida = escena.mitadAlto  * 0.98f;
 
     // ============================
