@@ -2,6 +2,7 @@
 
 #include "zipzip/core/camara.h"
 
+#include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
 #include <algorithm>
@@ -36,6 +37,45 @@ constexpr float INCLINACION_OVNI_FRACCION = 0.35f;
 // geometria una sola vez y al dibujarla cada frame).
 constexpr int SEGMENTOS_ESFERA = 32;
 constexpr int LATITUDES_ESFERA = 16;
+
+// Carga un BMP usando SDL2 y lo convierte a RGBA antes de subirlo a OpenGL.
+// Devuelve false sin interrumpir el programa: quien dibuja conserva su color
+// solido anterior como respaldo cuando el archivo falta o esta danado.
+bool cargarTexturaBMP(const char* ruta, unsigned int& textura,
+                      bool repetir) {
+    SDL_Surface* original = SDL_LoadBMP(ruta);
+    if (!original) {
+        SDL_Log("Aviso: no se pudo cargar la textura '%s': %s",
+                ruta, SDL_GetError());
+        return false;
+    }
+
+    SDL_Surface* rgba = SDL_ConvertSurfaceFormat(
+        original, SDL_PIXELFORMAT_RGBA32, 0);
+    SDL_FreeSurface(original);
+    if (!rgba) {
+        SDL_Log("Aviso: no se pudo convertir la textura '%s': %s",
+                ruta, SDL_GetError());
+        return false;
+    }
+
+    glGenTextures(1, &textura);
+    glBindTexture(GL_TEXTURE_2D, textura);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                    repetir ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                    repetir ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    SDL_FreeSurface(rgba);
+
+    SDL_Log("Textura cargada: %s", ruta);
+    return true;
+}
 
 struct Glifo {
     char caracter;
@@ -119,13 +159,9 @@ std::vector<unsigned char> generarTexturaPlaneta(int estilo) {
     std::vector<unsigned char> pixeles(
         static_cast<size_t>(ANCHO_TEXTURA * ALTO_TEXTURA * 3));
 
-    // A diferencia de la simulacion de las vacas, este si es un kernel
-    // compute-bound "de libro": cada pixel hace varios sin/cos/pow/exp y
-    // escribe en una posicion propia. Sirve de contraste en el informe
-    // frente al kernel memory-bound de la integracion O(N).
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2) schedule(runtime)
-#endif
+    // Esta preparacion pertenece al modulo grafico y se mantiene en el hilo
+    // principal. OpenMP se reserva para la simulacion, no para SDL/OpenGL ni
+    // para la construccion de sus recursos.
     for (int y = 0; y < ALTO_TEXTURA; ++y) {
         const float v = (static_cast<float>(y) + 0.5f) /
                         static_cast<float>(ALTO_TEXTURA);
@@ -239,9 +275,16 @@ void Renderer::inicializar() {
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_NORMAL_ARRAY);
 
+    prepararTexturasEscena();
     prepararTexturasPlanetas();
     prepararEsferaPlaneta();
     configurarProyeccion();
+}
+
+void Renderer::prepararTexturasEscena() {
+    cargarTexturaBMP("assets/textures/space_background.bmp",
+                     texturaFondo_, false);
+    cargarTexturaBMP("assets/textures/grass.bmp", texturaGrama_, true);
 }
 
 void Renderer::prepararEsferaPlaneta() {
@@ -347,6 +390,14 @@ void Renderer::liberarRecursos() {
                   std::end(texturasPlanetas_), 0u);
         texturasPlanetasPreparadas_ = false;
     }
+    if (texturaFondo_ != 0) {
+        glDeleteTextures(1, &texturaFondo_);
+        texturaFondo_ = 0;
+    }
+    if (texturaGrama_ != 0) {
+        glDeleteTextures(1, &texturaGrama_);
+        texturaGrama_ = 0;
+    }
 }
 
 void Renderer::restaurarEstadoRender() {
@@ -367,11 +418,47 @@ void Renderer::alternarCulling() {
     else glDisable(GL_CULL_FACE);
 }
 
+void Renderer::dibujarFondo() {
+    if (texturaFondo_ == 0) return;
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, ancho_, alto_, 0.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texturaFondo_);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(0.0f, 0.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(static_cast<float>(ancho_), 0.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(static_cast<float>(ancho_),
+                                         static_cast<float>(alto_));
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(0.0f,
+                                         static_cast<float>(alto_));
+    glEnd();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_TEXTURE_2D);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
 void Renderer::dibujarEstrellas(const CampoEstrellas& campo) {
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    dibujarFondo();
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
@@ -486,15 +573,33 @@ void Renderer::dibujarPlataforma(const Escena& escena) {
     // ============================
     // CARA SUPERIOR (abanico de triangulos desde el centro)
     // ============================
+    const bool usarTexturaGrama = texturaGrama_ != 0;
+    if (usarTexturaGrama) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texturaGrama_);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    }
+
     glBegin(GL_TRIANGLE_FAN);
-    glColor3f(0.62f, 0.90f, 0.10f);
+    if (usarTexturaGrama) glColor3f(0.82f, 0.90f, 0.78f);
+    else glColor3f(0.62f, 0.90f, 0.10f);
+    glTexCoord2f(2.5f, 0.0f);
     glVertex3f(0.0f, centroY, 0.0f);
-    glColor3f(0.72f, 0.95f, 0.08f);
+    if (usarTexturaGrama) glColor3f(0.92f, 0.98f, 0.88f);
+    else glColor3f(0.72f, 0.95f, 0.08f);
     for (int i = 0; i <= SEGMENTOS_PLATAFORMA; ++i) {
         const auto p = puntoArco(i);
+        const float u = (p[0] / radio + 1.0f) * 2.5f;
+        const float v = ((p[1] - centroY) / radio) * 5.0f;
+        glTexCoord2f(u, v);
         glVertex3f(p[0], p[1], 0.0f);
     }
     glEnd();
+
+    if (usarTexturaGrama) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    }
 
     // ============================
     // FALDA CURVA (pared que baja desde el arco)
@@ -556,15 +661,44 @@ void Renderer::dibujarOvni(const Modelo& modeloOvni, const Escena& escena) {
     glRotatef(escena.ovni.giro, 0.0f, 1.0f, 0.0f);
     glScalef(escena.ovni.escala, escena.ovni.escala, escena.ovni.escala);
 
-    // Tinte verde fijo: el modelo no trae color propio, igual que el de las
-    // vacas, pero aqui una sola instancia no necesita variarlo. El archivo
-    // no separa el gato del OVNI en grupos/materiales, asi que el tinte
-    // cubre el modelo completo.
-    glColor3f(0.20f, 0.75f, 0.35f);
-
     glVertexPointer(3, GL_FLOAT, 0, modeloOvni.pos.data());
     glNormalPointer(GL_FLOAT, 0, modeloOvni.nrm.data());
-    glDrawArrays(GL_TRIANGLES, 0, modeloOvni.triangulos * 3);
+
+    const bool tieneGrupoGato = std::any_of(
+        modeloOvni.rangos.begin(), modeloOvni.rangos.end(),
+        [](const RangoModelo& rango) { return rango.nombre == "gato"; });
+
+    if (!tieneGrupoGato) {
+        // Compatibilidad con cualquier OBJ anterior que no tenga grupos.
+        glColor3f(0.20f, 0.75f, 0.35f);
+        glDrawArrays(GL_TRIANGLES, 0, modeloOvni.triangulos * 3);
+        return;
+    }
+
+    const GLfloat sinEmision[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    const GLfloat reflejoMetal[] = { 0.92f, 0.95f, 1.0f, 1.0f };
+    const GLfloat emisionNeon[] = { 0.02f, 0.42f, 0.08f, 1.0f };
+
+    for (const RangoModelo& rango : modeloOvni.rangos) {
+        if (rango.nombre == "gato") {
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, sinEmision);
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 0.0f);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emisionNeon);
+            glColor3f(0.10f, 1.0f, 0.25f);
+        } else {
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, sinEmision);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, reflejoMetal);
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 88.0f);
+            glColor3f(0.48f, 0.53f, 0.62f);
+        }
+        glDrawArrays(GL_TRIANGLES, rango.primerVertice,
+                     rango.cantidadVertices);
+    }
+
+    // No dejar emision ni brillo metalico activos para el siguiente frame.
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, sinEmision);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, sinEmision);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 0.0f);
 }
 
 void Renderer::dibujarHUD(float fps, int vacas, int estrellas,

@@ -13,10 +13,17 @@
 // Malla lista para dibujar: arrays planos, sin indices.
 // Cada triangulo ocupa 3 vertices consecutivos, asi que se puede pasar
 // directo a glDrawArrays(GL_TRIANGLES, 0, triangulos * 3).
+struct RangoModelo {
+    std::string nombre;
+    int primerVertice = 0;
+    int cantidadVertices = 0;
+};
+
 struct Modelo {
     std::vector<float> pos;   // 3 floats por vertice (x, y, z)
     std::vector<float> nrm;   // 3 floats por vertice (nx, ny, nz)
     std::vector<float> uv;    // 2 floats por vertice, vacio si el OBJ no traia vt
+    std::vector<RangoModelo> rangos; // grupos 'g'/'o' contiguos del OBJ
 
     bool tieneUV     = false;  // el archivo traia coordenadas de textura
     bool normalesGen = false;  // true si las normales las calculamos nosotros

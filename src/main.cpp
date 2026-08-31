@@ -13,8 +13,9 @@
 #endif
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
-#include <cstdlib>
+#include <cstdint>
 #include <iostream>
 #include <string>
 
@@ -26,10 +27,24 @@ constexpr int VACAS_POR_DEFECTO = 20;
 constexpr int ESTRELLAS_POR_DEFECTO = 180;
 constexpr int FRAMES_BENCH_POR_DEFECTO = 300;
 
+enum class ModoEjecucion {
+    Serial,
+    Paralelo
+};
+
 struct Opciones {
+    int ancho = ANCHO;
+    int alto = ALTO;
     int cantidadVacas = VACAS_POR_DEFECTO;
     int cantidadEstrellas = ESTRELLAS_POR_DEFECTO;
     std::string rutaModelo = "assets/models/cow.obj";
+    std::uint32_t semilla = 1234u;
+#ifdef _OPENMP
+    ModoEjecucion modo = ModoEjecucion::Paralelo;
+#else
+    ModoEjecucion modo = ModoEjecucion::Serial;
+#endif
+    bool paralelizarEstrellas = false;
 
     // Cuantos hilos usa OpenMP. 0 significa "el valor por defecto del
     // entorno" (OMP_NUM_THREADS o los nucleos disponibles).
@@ -52,64 +67,157 @@ struct Opciones {
     // Imprime el estado final (posiciones) para comparar bit a bit entre
     // una corrida serial y una paralela con la misma semilla.
     bool dumpEstado = false;
+    bool mostrarAyuda = false;
 };
 
-// Convierte argv[i] a entero positivo; retorna -1 si no es un numero valido.
-int leerEntero(const char* texto) {
-    char* fin = nullptr;
-    const long valor = std::strtol(texto, &fin, 10);
-    if (fin == texto || *fin != '\0' || valor <= 0) return -1;
-    return static_cast<int>(valor);
+bool leerEnteroEnRango(const std::string& texto, int minimo, int maximo,
+                       int& resultado) {
+    int valor = 0;
+    const char* inicio = texto.data();
+    const char* fin = inicio + texto.size();
+    const auto conversion = std::from_chars(inicio, fin, valor);
+    if (conversion.ec != std::errc() || conversion.ptr != fin ||
+        valor < minimo || valor > maximo) {
+        return false;
+    }
+    resultado = valor;
+    return true;
 }
 
-Opciones leerArgumentos(int argc, char* argv[]) {
-    Opciones opciones;
+bool leerSemilla(const std::string& texto, std::uint32_t& resultado) {
+    std::uint32_t valor = 0;
+    const char* inicio = texto.data();
+    const char* fin = inicio + texto.size();
+    const auto conversion = std::from_chars(inicio, fin, valor);
+    if (conversion.ec != std::errc() || conversion.ptr != fin || valor == 0u) {
+        return false;
+    }
+    resultado = valor;
+    return true;
+}
+
+void imprimirAyuda(const char* programa) {
+    std::cout
+        << "Uso: " << programa << " [N] [opciones]\n"
+        << "  --modo serial|paralelo      Modo de la simulacion\n"
+        << "  --vacas N                   Cantidad de vacas (1..100000)\n"
+        << "  --estrellas N               Cantidad de estrellas (1..1000000)\n"
+        << "  --estrellas-paralelas       Evaluar estrellas tambien con OpenMP\n"
+        << "  --hilos N                   Hilos OpenMP (1..1024)\n"
+        << "  --schedule static|dynamic|guided\n"
+        << "  --chunk N                   Bloque del schedule (0 = automatico)\n"
+        << "  --ancho N --alto N          Canvas (minimo 640x480)\n"
+        << "  --semilla N                 Semilla reproducible (> 0)\n"
+        << "  --modelo ruta               Modelo OBJ de las vacas\n"
+        << "  --bench --frames N          Medicion sin ventana\n"
+        << "  --dump-estado               Estado final para comprobar carreras\n"
+        << "  --ayuda                     Mostrar este texto\n";
+}
+
+bool leerArgumentos(int argc, char* argv[], Opciones& opciones,
+                     std::string& error) {
+    bool modeloPosicionalAsignado = false;
+
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
 
-        auto siguienteValor = [&](const char* nombre) -> std::string {
+        auto siguienteValor = [&](const char* nombre, std::string& valor) {
             if (i + 1 >= argc) {
-                std::cerr << "Falta el valor de " << nombre << "\n";
-                std::exit(1);
+                error = std::string("Falta el valor de ") + nombre;
+                return false;
             }
-            return argv[++i];
+            valor = argv[++i];
+            return true;
+        };
+
+        auto enteroOError = [&](const char* nombre, int minimo, int maximo,
+                                int& destino) {
+            std::string texto;
+            if (!siguienteValor(nombre, texto)) return false;
+            if (!leerEnteroEnRango(texto, minimo, maximo, destino)) {
+                error = std::string("Valor invalido para ") + nombre +
+                        ": '" + texto + "' (rango " +
+                        std::to_string(minimo) + ".." +
+                        std::to_string(maximo) + ")";
+                return false;
+            }
+            return true;
         };
 
         if (arg == "--vacas") {
-            opciones.cantidadVacas = leerEntero(siguienteValor("--vacas").c_str());
+            if (!enteroOError("--vacas", 1, 100000,
+                              opciones.cantidadVacas)) return false;
         } else if (arg == "--estrellas") {
-            opciones.cantidadEstrellas =
-                leerEntero(siguienteValor("--estrellas").c_str());
+            if (!enteroOError("--estrellas", 1, 1000000,
+                              opciones.cantidadEstrellas)) return false;
         } else if (arg == "--hilos") {
-            opciones.hilos = leerEntero(siguienteValor("--hilos").c_str());
+            if (!enteroOError("--hilos", 1, 1024, opciones.hilos)) return false;
         } else if (arg == "--schedule") {
-            opciones.schedule = siguienteValor("--schedule");
+            if (!siguienteValor("--schedule", opciones.schedule)) return false;
+            if (opciones.schedule != "static" &&
+                opciones.schedule != "dynamic" &&
+                opciones.schedule != "guided") {
+                error = "--schedule debe ser static, dynamic o guided";
+                return false;
+            }
         } else if (arg == "--chunk") {
-            opciones.chunk = leerEntero(siguienteValor("--chunk").c_str());
+            if (!enteroOError("--chunk", 0, 1000000, opciones.chunk)) return false;
         } else if (arg == "--modelo") {
-            opciones.rutaModelo = siguienteValor("--modelo");
+            if (!siguienteValor("--modelo", opciones.rutaModelo)) return false;
+            if (opciones.rutaModelo.empty()) {
+                error = "--modelo no puede estar vacio";
+                return false;
+            }
+        } else if (arg == "--modo") {
+            std::string modo;
+            if (!siguienteValor("--modo", modo)) return false;
+            if (modo == "serial") opciones.modo = ModoEjecucion::Serial;
+            else if (modo == "paralelo") opciones.modo = ModoEjecucion::Paralelo;
+            else {
+                error = "--modo debe ser serial o paralelo";
+                return false;
+            }
+        } else if (arg == "--estrellas-paralelas") {
+            opciones.paralelizarEstrellas = true;
+        } else if (arg == "--ancho") {
+            if (!enteroOError("--ancho", 640, 7680, opciones.ancho)) return false;
+        } else if (arg == "--alto") {
+            if (!enteroOError("--alto", 480, 4320, opciones.alto)) return false;
+        } else if (arg == "--semilla") {
+            std::string texto;
+            if (!siguienteValor("--semilla", texto)) return false;
+            if (!leerSemilla(texto, opciones.semilla)) {
+                error = "Valor invalido para --semilla: '" + texto + "'";
+                return false;
+            }
         } else if (arg == "--bench") {
             opciones.bench = true;
         } else if (arg == "--frames") {
-            opciones.frames = leerEntero(siguienteValor("--frames").c_str());
+            if (!enteroOError("--frames", 1, 100000,
+                              opciones.frames)) return false;
         } else if (arg == "--dump-estado") {
             opciones.dumpEstado = true;
+        } else if (arg == "--ayuda" || arg == "--help" || arg == "-h") {
+            opciones.mostrarAyuda = true;
         } else {
             // Compatibilidad con la forma antigua: un numero suelto es la
             // cantidad de vacas; cualquier otra cosa es la ruta del modelo.
-            const int cantidad = leerEntero(arg.c_str());
-            if (cantidad > 0) opciones.cantidadVacas = cantidad;
-            else opciones.rutaModelo = arg;
+            int cantidad = 0;
+            if (leerEnteroEnRango(arg, 1, 100000, cantidad)) {
+                opciones.cantidadVacas = cantidad;
+            } else if (!arg.empty() && arg.front() == '-') {
+                error = "Opcion desconocida: " + arg;
+                return false;
+            } else if (!modeloPosicionalAsignado) {
+                opciones.rutaModelo = arg;
+                modeloPosicionalAsignado = true;
+            } else {
+                error = "Argumento posicional inesperado: " + arg;
+                return false;
+            }
         }
     }
-
-    if (opciones.cantidadVacas <= 0) opciones.cantidadVacas = VACAS_POR_DEFECTO;
-    if (opciones.cantidadEstrellas <= 0) {
-        opciones.cantidadEstrellas = ESTRELLAS_POR_DEFECTO;
-    }
-    if (opciones.frames <= 0) opciones.frames = FRAMES_BENCH_POR_DEFECTO;
-
-    return opciones;
+    return true;
 }
 
 // Sin controles de simulacion (pausa/wireframe/culling/vsync): la ventana
@@ -133,6 +241,10 @@ bool procesarEventos() {
 // la linea de comandos sin recompilar: los pragmas usan schedule(runtime).
 int configurarOpenMP(const Opciones& opciones) {
 #ifdef _OPENMP
+    if (opciones.modo == ModoEjecucion::Serial) {
+        omp_set_num_threads(1);
+        return 1;
+    }
     if (opciones.hilos > 0) omp_set_num_threads(opciones.hilos);
 
     omp_sched_t tipo = omp_sched_static;
@@ -149,6 +261,19 @@ int configurarOpenMP(const Opciones& opciones) {
     (void)opciones;
     return 1;
 #endif
+}
+
+bool usarOpenMP(const Opciones& opciones) {
+#ifdef _OPENMP
+    return opciones.modo == ModoEjecucion::Paralelo;
+#else
+    (void)opciones;
+    return false;
+#endif
+}
+
+const char* nombreModo(const Opciones& opciones) {
+    return usarOpenMP(opciones) ? "paralelo" : "serial";
 }
 
 // Imprime posicion y velocidad de cada vaca con precision suficiente para
@@ -173,20 +298,26 @@ int ejecutarBench(const Opciones& opciones) {
     constexpr int FRAMES_CALENTAMIENTO = 30;
 
     const int hilos = configurarOpenMP(opciones);
+    const bool paralelo = usarOpenMP(opciones);
+    const bool estrellasParalelas = paralelo && opciones.paralelizarEstrellas;
 
     const float mitadAlto = zipzip::mitadAltoVisible();
-    const float mitadAncho = mitadAlto * (static_cast<float>(ANCHO) / ALTO);
+    const float mitadAncho = mitadAlto *
+        (static_cast<float>(opciones.ancho) / opciones.alto);
 
     Escena escena;
-    crearEscena(escena, opciones.cantidadVacas, mitadAncho, mitadAlto);
+    crearEscena(escena, opciones.cantidadVacas, mitadAncho, mitadAlto,
+                opciones.semilla);
 
     CampoEstrellas campoEstrellas;
     crearCampoEstrellas(campoEstrellas, opciones.cantidadEstrellas,
-                        mitadAncho, mitadAlto);
+                        mitadAncho, mitadAlto,
+                        opciones.semilla ^ 0x9E3779B9u);
 
     for (int indiceFrame = 0; indiceFrame < FRAMES_CALENTAMIENTO; ++indiceFrame) {
-        actualizarEscena(escena, DT_FIJO);
-        actualizarCampoEstrellas(campoEstrellas, DT_FIJO);
+        actualizarEscena(escena, DT_FIJO, paralelo);
+        actualizarCampoEstrellas(campoEstrellas, DT_FIJO,
+                                 estrellasParalelas);
     }
 
     // Se mide el total y, por separado, cada pasada de actualizarEscena.
@@ -200,8 +331,10 @@ int ejecutarBench(const Opciones& opciones) {
         double msPasadaA = 0.0;
         double msPasadaB = 0.0;
         cronometroSim.iniciar();
-        actualizarEscena(escena, DT_FIJO, &msPasadaA, &msPasadaB);
-        actualizarCampoEstrellas(campoEstrellas, DT_FIJO);
+        actualizarEscena(escena, DT_FIJO, paralelo,
+                         &msPasadaA, &msPasadaB);
+        actualizarCampoEstrellas(campoEstrellas, DT_FIJO,
+                                 estrellasParalelas);
         cronometroSim.detener();
         cronometroPasadaA.registrarMuestra(msPasadaA);
         cronometroPasadaB.registrarMuestra(msPasadaB);
@@ -225,11 +358,14 @@ int ejecutarBench(const Opciones& opciones) {
     // ms_pasada_a = interaccion O(N^2) entre vacas (compute-bound).
     // ms_pasada_b = integracion O(N) (memory-bound, aqui vive false sharing).
     std::fprintf(stderr,
-        "vacas,estrellas,hilos,schedule,chunk,ms_sim_avg,ms_sim_p95,"
-        "ms_pasada_a_avg,ms_pasada_b_avg,ms_render_avg,fps\n");
-    std::printf("%d,%d,%d,%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.3f\n",
-                opciones.cantidadVacas, opciones.cantidadEstrellas, hilos,
-                opciones.schedule.c_str(), opciones.chunk, msSimAvg,
+        "modo,vacas,estrellas,hilos,estrellas_paralelas,schedule,chunk,"
+        "semilla,ms_sim_avg,ms_sim_p95,ms_pasada_a_avg,ms_pasada_b_avg,"
+        "ms_render_avg,fps\n");
+    std::printf("%s,%d,%d,%d,%d,%s,%d,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.3f\n",
+                nombreModo(opciones), opciones.cantidadVacas,
+                opciones.cantidadEstrellas, hilos,
+                estrellasParalelas ? 1 : 0, opciones.schedule.c_str(),
+                opciones.chunk, opciones.semilla, msSimAvg,
                 cronometroSim.p95Ms(), cronometroPasadaA.promedioMs(),
                 cronometroPasadaB.promedioMs(), 0.0, fpsSim);
     return 0;
@@ -238,7 +374,30 @@ int ejecutarBench(const Opciones& opciones) {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    const Opciones opciones = leerArgumentos(argc, argv);
+    Opciones opciones;
+    std::string errorArgumentos;
+    if (!leerArgumentos(argc, argv, opciones, errorArgumentos)) {
+        std::cerr << "Error: " << errorArgumentos << "\n\n";
+        imprimirAyuda(argv[0]);
+        return 2;
+    }
+    if (opciones.mostrarAyuda) {
+        imprimirAyuda(argv[0]);
+        return 0;
+    }
+
+#ifndef _OPENMP
+    if (opciones.modo == ModoEjecucion::Paralelo) {
+        std::cerr << "Error: este ejecutable fue compilado sin OpenMP; "
+                     "usa --modo serial o recompila con ZIPZIP_OPENMP=ON\n";
+        return 2;
+    }
+#endif
+    if (opciones.modo == ModoEjecucion::Serial &&
+        opciones.paralelizarEstrellas) {
+        std::cerr << "Error: --estrellas-paralelas requiere --modo paralelo\n";
+        return 2;
+    }
 
     if (opciones.bench) {
         return ejecutarBench(opciones);
@@ -256,8 +415,8 @@ int main(int argc, char* argv[]) {
         "ZipZip Espacial",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        ANCHO,
-        ALTO,
+        opciones.ancho,
+        opciones.alto,
         SDL_WINDOW_OPENGL);
 
     if (!ventana) {
@@ -302,25 +461,29 @@ int main(int argc, char* argv[]) {
 
     const int hilos = configurarOpenMP(opciones);
 
-    Renderer renderer(ANCHO, ALTO);
+    Renderer renderer(opciones.ancho, opciones.alto);
     renderer.inicializar();
 
     const float mitadAlto = renderer.mitadAltoVisible();
-    const float mitadAncho = mitadAlto * (static_cast<float>(ANCHO) / ALTO);
+    const float mitadAncho = mitadAlto *
+        (static_cast<float>(opciones.ancho) / opciones.alto);
 
     Escena escena;
-    crearEscena(escena, opciones.cantidadVacas, mitadAncho, mitadAlto);
+    crearEscena(escena, opciones.cantidadVacas, mitadAncho, mitadAlto,
+                opciones.semilla);
 
     CampoEstrellas campoEstrellas;
     crearCampoEstrellas(campoEstrellas, opciones.cantidadEstrellas,
-                        mitadAncho, mitadAlto);
+                        mitadAncho, mitadAlto,
+                        opciones.semilla ^ 0x9E3779B9u);
 
     SDL_Log("Modelo '%s': %d vertices, %d triangulos",
             opciones.rutaModelo.c_str(), modelo.verticesRaw, modelo.triangulos);
     SDL_Log("Modelo OVNI: %d vertices, %d triangulos",
             modeloOvni.verticesRaw, modeloOvni.triangulos);
-    SDL_Log("Escena: %d vacas y %d estrellas",
-            opciones.cantidadVacas, opciones.cantidadEstrellas);
+    SDL_Log("Escena: %d vacas, %d estrellas, modo %s, semilla %u",
+            opciones.cantidadVacas, opciones.cantidadEstrellas,
+            nombreModo(opciones), opciones.semilla);
 
     bool corriendo = true;
     Uint32 anterior = SDL_GetTicks();
@@ -361,16 +524,19 @@ int main(int argc, char* argv[]) {
             char titulo[200];
             SDL_snprintf(titulo, sizeof(titulo),
                          "ZipZip Espacial - %d vacas - %d estrellas - "
-                         "%.1f FPS - sim %.2f ms - render %.2f ms - %d hilos",
+                         "%.1f FPS - sim %.2f ms - render %.2f ms - %s - %d hilos",
                          opciones.cantidadVacas, opciones.cantidadEstrellas,
-                         fps, msSimActual, msRenderActual, hilos);
+                         fps, msSimActual, msRenderActual,
+                         nombreModo(opciones), hilos);
             SDL_SetWindowTitle(ventana, titulo);
             SDL_Log("%s", titulo);
         }
 
         cronometroSim.iniciar();
-        actualizarEscena(escena, dt);
-        actualizarCampoEstrellas(campoEstrellas, dt);
+        actualizarEscena(escena, dt, usarOpenMP(opciones));
+        actualizarCampoEstrellas(
+            campoEstrellas, dt,
+            usarOpenMP(opciones) && opciones.paralelizarEstrellas);
         cronometroSim.detener();
 
         cronometroRender.iniciar();

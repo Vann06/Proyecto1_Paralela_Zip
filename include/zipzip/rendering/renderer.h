@@ -29,6 +29,7 @@ public:
 
 private:
     void configurarProyeccion();
+    void prepararTexturasEscena();
     void prepararTexturasPlanetas();
     void prepararEsferaPlaneta();
 
@@ -39,6 +40,7 @@ private:
     // lineas cada vez.
     void restaurarEstadoRender();
 
+    void dibujarFondo();
     void dibujarEstrellas(const CampoEstrellas& campo);
     void dibujarPlataforma(const Escena& escena);
     void dibujarVacas(const Modelo& modelo, const Escena& escena);
@@ -50,6 +52,8 @@ private:
     int alto_;
     bool wireframe_ = false;
     bool culling_ = false;
+    unsigned int texturaFondo_ = 0;
+    unsigned int texturaGrama_ = 0;
     unsigned int texturasPlanetas_[4] = {};
     bool texturasPlanetasPreparadas_ = false;
 

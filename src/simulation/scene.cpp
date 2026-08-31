@@ -168,7 +168,7 @@ void crearEscena(Escena& e, int n,
     }
 }
 
-void actualizarEscena(Escena& e, float dt,
+void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
                       double* msPasadaA, double* msPasadaB) {
     const long cantidadVacas = static_cast<long>(e.vacas.size());
 
@@ -213,7 +213,9 @@ void actualizarEscena(Escena& e, float dt,
 
     const auto inicioA = std::chrono::steady_clock::now();
 #ifdef _OPENMP
-#pragma omp parallel for schedule(runtime) reduction(min:distanciaMinimaOvni)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime) reduction(min:distanciaMinimaOvni)
+#else
+    (void)usarOpenMP;
 #endif
     for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
         const Instancia& vacaActual = e.vacas[static_cast<size_t>(indiceVaca)];
@@ -275,7 +277,7 @@ void actualizarEscena(Escena& e, float dt,
     // ---------------------------------------------------------------------
     const auto inicioB = std::chrono::steady_clock::now();
 #ifdef _OPENMP
-#pragma omp parallel for schedule(runtime)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime)
 #endif
     for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
         Instancia& vaca = e.vacas[static_cast<size_t>(indiceVaca)];

@@ -27,11 +27,9 @@ varios ayudantes" es una línea que empieza así:
 #pragma omp parallel for
 ```
 
-Busca esa frase (o `pragma omp` a secas) en los archivos del proyecto y vas a
-encontrar **exactamente 4 lugares**. Nada más. Todo el resto del programa —
-que es la mayoría del código — lo sigue haciendo una sola persona (un solo
-hilo), porque en esos otros lugares contratar ayuda no habría ayudado (más
-abajo se explica por qué).
+Busca esa frase (o `pragma omp` a secas) en los archivos del proyecto. Hay
+**dos lazos principales de vacas** y un tercero opcional para estrellas. El
+resto, especialmente SDL/OpenGL y `Renderer`, permanece en el hilo principal.
 
 ## Primero: ¿quién decide *cuántos* ayudantes se contratan?
 
@@ -40,8 +38,9 @@ decide **cuánta gente hay disponible para ayudar**. Eso pasa en un solo
 lugar, `src/main.cpp`, en una función llamada `configurarOpenMP`:
 
 ```cpp
-// src/main.cpp, líneas 134-147
+// src/main.cpp, función configurarOpenMP
 int configurarOpenMP(const Opciones& opciones) {
+    if (opciones.modo == ModoEjecucion::Serial) return 1;
     if (opciones.hilos > 0) omp_set_num_threads(opciones.hilos);
     // ...decide si repartir el trabajo en bloques iguales de antemano
     // ('static'), o de a poquitos conforme cada quien va terminando
@@ -66,13 +65,13 @@ repartir la lista de tareas** (`omp_set_schedule`):
   todas lo mismo, pero organizar cada entrega tiene su propio costillo.
 
 Esto se controla desde afuera del programa, sin tocar el código, con las
-opciones `--hilos` y `--schedule`:
+opciones `--modo`, `--hilos` y `--schedule`:
 
 ```bash
-./zipzip --vacas 3000 --hilos 8 --schedule dynamic
+./zipzip --modo paralelo --vacas 3000 --hilos 8 --schedule dynamic
 ```
 
-## Los 4 lugares exactos donde se reparte trabajo
+## Los lugares donde se reparte trabajo
 
 ### 1. Las vacas se separan entre sí — el más importante
 
@@ -80,7 +79,8 @@ opciones `--hilos` y `--schedule`:
 `actualizarEscena` (la "Pasada A" del documento 2).
 
 ```cpp
-#pragma omp parallel for schedule(runtime) reduction(min:distanciaMinimaOvni)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime) \
+    reduction(min:distanciaMinimaOvni)
 for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
     // ...revisar a TODAS las demás vacas y decidir si hay que
     // alejarse de alguna que esté muy cerca...
@@ -109,7 +109,7 @@ puede mostrar una diferencia clara entre correr con 1 hilo y correr con 16.
 misma función (la "Pasada B" del documento 2).
 
 ```cpp
-#pragma omp parallel for schedule(runtime)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime)
 for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
     Instancia& vaca = e.vacas[static_cast<size_t>(indiceVaca)];
     // ...mover a ESTA vaca según lo que decidió en el paso anterior,
@@ -134,13 +134,13 @@ repartirla entre más gente se aplana rápido. Este contraste — la tarea 1 sí
 escala bien, la tarea 2 casi no — es justo el resultado que el proyecto
 quiere mostrar en el informe.
 
-### 3. Las estrellas de fondo se mueven
+### 3. Las estrellas de fondo: experimento opcional
 
-**Dónde:** `src/simulation/starfield.cpp`, línea 115, en
+**Dónde:** `src/simulation/starfield.cpp`, en
 `actualizarCampoEstrellas`.
 
 ```cpp
-#pragma omp parallel for schedule(runtime)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime)
 for (long i = 0; i < cantidadEstrellas; ++i) {
     Estrella& estrella = campo.estrellas[static_cast<size_t>(i)];
     // ...moverla un poquito, y si se salió de la pantalla, reaparecerla
@@ -157,56 +157,34 @@ estrellas y cada una es baratísima de mover — el tiempo que se ahorra
 repartiendo el trabajo es menor que el tiempo que cuesta organizar quién
 hace qué.
 
-**¿Valió la pena?** **Casi nada**, con la cantidad de estrellas que trae el
-programa por defecto (180). Se dejó paralelizado más que nada por
-completitud (para que el patrón sea consistente en todo el código), no
-porque haga una diferencia real que se note.
+**¿Valió la pena?** Con 180 estrellas, normalmente **no**: el costo de formar
+el equipo OpenMP supera el trabajo ahorrado. Por eso el lazo recibe `false`
+por defecto y solo se activa con `--estrellas-paralelas`. El experimento 4 de
+`scripts/benchmark.sh` repite la comparación con 180 y 10,000 estrellas para
+determinar a partir de qué M comienza a convenir.
 
-### 4. Las texturas de los planetas — el más "de libro"
-
-**Dónde:** `src/rendering/renderer.cpp`, línea 127, en
-`generarTexturaPlaneta`.
-
-```cpp
-#pragma omp parallel for collapse(2) schedule(runtime)
-for (int y = 0; y < ALTO_TEXTURA; ++y) {
-    for (int x = 0; x < ANCHO_TEXTURA; ++x) {
-        // ...calcular de qué color debe pintarse este pixel, usando
-        // varias cuentas trigonométricas (senos, cosenos)...
-    }
-}
-```
-
-**La tarea que se reparte:** decidir el color de cada uno de los 96×48 =
-4,608 pixeles que forman la textura de un planeta (los remolinos, las nubes,
-la lava — todo calculado con fórmulas, no con una imagen). Aquí aparece
-además la palabra `collapse(2)`: como hay **dos** bucles anidados (uno para
-las filas `y`, otro para las columnas `x`), `collapse(2)` le dice a OpenMP
-"trátalos como una sola lista larga de 4,608 tareas", en vez de repartir
-solo las 48 filas — así hay más para repartir entre más ayudantes.
-
-**La analogía:** esta es la tarea más parecida al ejemplo clásico de
-"contratar gente" que se explica en clase: cada uno de los 4,608 pixeles es
-completamente independiente, y cada uno cuesta lo mismo de calcular
-(bastantes cuentas trigonométricas). Es el caso ideal para repartir: mucho
-trabajo, parejo, sin que nadie tenga que esperar a nadie.
-
-**¿Valió la pena?** **En teoría, sí — es el ejemplo más "limpio" de los
-cuatro.** En la práctica, esto solo se calcula **4 veces en total** (una por
-cada planeta, una sola vez al arrancar el programa, no en cada frame), así
-que aunque escala muy bien, el tiempo total que ahorra en todo el programa
-es chiquito. Sirve sobre todo como punto de comparación en el informe: es
-un ejemplo de trabajo "parejo y pesado por tarea", muy distinto a la vaca de
-la Pasada A.
+Las texturas procedurales de planetas ya no se paralelizan. Aunque cada pixel
+es independiente, esa preparación pertenece al módulo gráfico y ocurre solo
+al inicio. Mantenerla serial hace inequívoca la regla académica del proyecto:
+la simulación puede usar OpenMP; SDL, OpenGL y `Renderer` no.
 
 ## Resumen en una tabla
 
 | # | Archivo y línea | Qué se reparte | ¿Cuánto ayuda? |
 |---|---|---|---|
-| 1 | `scene.cpp:216` | Cada vaca revisa a todas las demás (separación) | **Mucho** — la tarea principal del proyecto |
-| 2 | `scene.cpp:278` | Cada vaca mueve solo su propia posición | Poco — tarea barata por vaca |
-| 3 | `starfield.cpp:115` | Cada estrella se mueve sola | Casi nada — muy pocas estrellas, muy barato |
-| 4 | `renderer.cpp:127` | Cada pixel de una textura de planeta | Mucho en teoría, pero se hace solo 4 veces en total |
+| 1 | `scene.cpp`, pasada A | Cada vaca revisa a todas las demás (separación) | **Mucho** — la tarea principal del proyecto |
+| 2 | `scene.cpp`, pasada B | Cada vaca mueve solo su propia posición | Poco — tarea barata por vaca |
+| 3 | `starfield.cpp` | Cada estrella se mueve sola | Opcional; con 180 estrellas suele perjudicar |
+
+## Sincronización entre las dos pasadas
+
+OpenMP coloca una **barrera implícita** al final de la Pasada A. Ningún hilo
+puede comenzar la Pasada B hasta que todos hayan terminado de escribir
+`ax[i]` y `ay[i]`. En la Pasada A cada hilo escribe índices distintos y la
+distancia mínima usa `reduction(min:...)`, que combina mínimos privados de
+forma segura. En la Pasada B cada hilo modifica una vaca distinta. No hace
+falta un mutex ni una sección `critical` porque no existen dos hilos
+escribiendo el mismo elemento.
 
 ## Y todo lo demás, ¿por qué no se repartió?
 
@@ -217,7 +195,7 @@ programa sigue haciéndolo una sola persona (un solo hilo), a propósito:
   (1 OVNI, 4 planetas) que ni vale la pena organizar ayudantes — sería como
   contratar 8 personas para cargar 4 cajas: la mayoría se queda sin hacer
   nada, y organizar quién carga cuál cuesta más que cargarlas tú mismo.
-- **Dibujar en pantalla** (todo `renderer.cpp` excepto el punto 4): dibujar
+- **Dibujar en pantalla y crear recursos** (todo `renderer.cpp`): dibujar
   usa una herramienta (OpenGL) que solo puede recibir instrucciones **una a
   la vez**, en un orden específico — es como un pintor con un solo pincel:
   no puedes repartir "pintar el cuadro" entre 8 personas si solo hay un
@@ -238,11 +216,11 @@ Si quieres *ver* esto pasando, no solo leerlo:
 1. Abre el Monitor de sistema / Administrador de tareas de tu computadora
    (o `htop` en Linux) **antes** de correr el programa, para ver cuántos
    núcleos tiene tu procesador.
-2. Corre el programa con muchas vacas y pocos hilos:
-   `./zipzip --vacas 5000 --hilos 1`. Vas a ver que solo un núcleo del
+2. Corre el programa explícitamente en serial:
+   `./zipzip --modo serial --vacas 5000`. Vas a ver que solo un núcleo del
    procesador se pone al 100% mientras los demás casi no se mueven.
-3. Cierra y corre lo mismo con más hilos:
-   `./zipzip --vacas 5000 --hilos 8`. Ahora deberías ver varios núcleos
+3. Cierra y corre lo mismo en paralelo:
+   `./zipzip --modo paralelo --vacas 5000 --hilos 8`. Ahora deberías ver varios núcleos
    trabajando al mismo tiempo — literalmente varias "personas" ayudando a
    la vez — y el número de FPS en el título de la ventana debería subir.
 

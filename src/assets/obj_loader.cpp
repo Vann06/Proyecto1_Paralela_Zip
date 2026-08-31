@@ -148,6 +148,8 @@ bool cargarOBJ(const std::string& ruta,
     std::vector<Vec3>   normalesArchivo; // normales ("vn") leidas del archivo
     std::vector<float>  coordenadasUV;   // uv ("vt"), 2 floats por entrada
     std::vector<Corner> tris;            // 3 corners por triangulo
+    std::vector<std::string> gruposTriangulos;
+    std::string grupoActual = "default";
 
     std::string linea;
     while (std::getline(archivo, linea)) {
@@ -174,6 +176,11 @@ bool cargarOBJ(const std::string& ruta,
             ss >> u >> v;
             coordenadasUV.push_back(u);
             coordenadasUV.push_back(v);
+        }
+        else if (tipo == "g" || tipo == "o") {
+            std::string nombre;
+            ss >> nombre;
+            grupoActual = nombre.empty() ? "default" : nombre;
         }
         else if (tipo == "f") {
             // Una cara puede tener 3, 4 o mas vertices.
@@ -203,9 +210,10 @@ bool cargarOBJ(const std::string& ruta,
                 tris.push_back(poly[0]);
                 tris.push_back(poly[indiceAbanico]);
                 tris.push_back(poly[indiceAbanico + 1]);
+                gruposTriangulos.push_back(grupoActual);
             }
         }
-        // mtllib, usemtl, o, g, s: ignorados a proposito
+        // mtllib, usemtl y s se ignoran; los grupos g/o se conservan.
     }
 
     if (posiciones.empty()) {
@@ -239,9 +247,24 @@ bool cargarOBJ(const std::string& ruta,
     out.pos.clear();
     out.nrm.clear();
     out.uv.clear();
+    out.rangos.clear();
     out.pos.reserve(tris.size() * 3);
     out.nrm.reserve(tris.size() * 3);
     if (out.tieneUV) out.uv.reserve(tris.size() * 2);
+
+    for (size_t indiceTriangulo = 0;
+         indiceTriangulo < gruposTriangulos.size(); ++indiceTriangulo) {
+        const std::string& nombre = gruposTriangulos[indiceTriangulo];
+        if (out.rangos.empty() || out.rangos.back().nombre != nombre) {
+            RangoModelo rango;
+            rango.nombre = nombre;
+            rango.primerVertice = static_cast<int>(indiceTriangulo * 3);
+            rango.cantidadVertices = 3;
+            out.rangos.push_back(rango);
+        } else {
+            out.rangos.back().cantidadVertices += 3;
+        }
+    }
 
     for (const Corner& esquina : tris) {
         const Vec3& punto = posiciones[esquina.indicePosicion];

@@ -104,7 +104,8 @@ void crearCampoEstrellas(CampoEstrellas& campo, int cantidad,
     }
 }
 
-void actualizarCampoEstrellas(CampoEstrellas& campo, float dt) {
+void actualizarCampoEstrellas(CampoEstrellas& campo, float dt,
+                              bool usarOpenMP) {
     campo.tiempo += dt;
 
     // O(N) e independiente por estrella, igual que la integracion de las
@@ -112,7 +113,9 @@ void actualizarCampoEstrellas(CampoEstrellas& campo, float dt) {
     // aporte al tiempo total es minimo frente a la interaccion O(N^2).
     const long cantidadEstrellas = static_cast<long>(campo.estrellas.size());
 #ifdef _OPENMP
-#pragma omp parallel for schedule(runtime)
+#pragma omp parallel for if(usarOpenMP) schedule(runtime)
+#else
+    (void)usarOpenMP;
 #endif
     for (long i = 0; i < cantidadEstrellas; ++i) {
         Estrella& estrella = campo.estrellas[static_cast<size_t>(i)];

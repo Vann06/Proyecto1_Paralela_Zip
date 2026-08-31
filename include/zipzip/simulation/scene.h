@@ -155,7 +155,7 @@ void crearEscena(Escena& e, int n,
 // false sharing con schedule(static, 1) vive en la pasada B (escribe en
 // Instancia, 40 bytes, menos de una linea de cache), pero la pasada A (el
 // O(N^2)) domina el tiempo total y lo diluye si solo se mide la suma.
-void actualizarEscena(Escena& e, float dt,
+void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
                       double* msPasadaA = nullptr,
                       double* msPasadaB = nullptr);
 

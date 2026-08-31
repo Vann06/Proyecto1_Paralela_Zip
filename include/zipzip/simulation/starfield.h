@@ -44,6 +44,7 @@ void crearCampoEstrellas(CampoEstrellas& campo, int cantidad,
                          unsigned semilla = 4321u);
 
 // Mueve las estrellas, actualiza su brillo y anima las estrellas fugaces.
-void actualizarCampoEstrellas(CampoEstrellas& campo, float dt);
+void actualizarCampoEstrellas(CampoEstrellas& campo, float dt,
+                              bool usarOpenMP = false);
 
 #endif // ZIPZIP_SIMULATION_STARFIELD_H
