@@ -1,32 +1,19 @@
 #include "zipzip/simulation/scene.h"
 
+#include "zipzip/core/camara.h"
+#include "zipzip/core/rng.h"
+
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 
 namespace {
 
-constexpr float PI = 3.14159265358979323846f;
-constexpr float MARGEN_INICIAL_ROMBO = 0.78f;
-constexpr float MARGEN_REBOTE_ROMBO = 0.995f;
+using zipzip::PI;
+using zipzip::Rng;
 
-// Generador propio en lugar de <random>: es determinista entre maquinas y
-// compiladores, asi la misma semilla da siempre la misma escena. Eso importa
-// para comparar tiempos entre la version serial y la paralela.
-struct Rng {
-    uint32_t s;
-    explicit Rng(uint32_t semilla) : s(semilla ? semilla : 1u) {}
-
-    uint32_t siguiente() {              // xorshift32
-        s ^= s << 13;
-        s ^= s >> 17;
-        s ^= s << 5;
-        return s;
-    }
-    // Real uniforme en [a, b).
-    float entre(float a, float b) {
-        return a + (b - a) * (static_cast<float>(siguiente()) / 4294967296.0f);
-    }
-};
+constexpr float MARGEN_INICIAL_CIRCULO = 0.85f;
+constexpr float MARGEN_REBOTE_CIRCULO = 0.995f;
 
 // Color desde un tono en [0,1), con saturacion y valor fijos.
 // Evita traer una libreria de color solo para esto.
@@ -49,15 +36,6 @@ void desdeTono(float h, float& r, float& g, float& b) {
     }
 }
 
-// En los vertices del rombo una coordenada puede ser exactamente cero. En
-// ese caso la componente de la velocidad permite escoger uno de los dos lados
-// adyacentes sin dejar la vaca oscilando entre ambas normales.
-float signoLado(float coordenada, float velocidad) {
-    if (coordenada > 0.0f) return 1.0f;
-    if (coordenada < 0.0f) return -1.0f;
-    return velocidad >= 0.0f ? 1.0f : -1.0f;
-}
-
 } // namespace anonimo
 
 void crearEscena(Escena& e, int n,
@@ -67,13 +45,23 @@ void crearEscena(Escena& e, int n,
 
     e.mitadAncho = mitadAncho;
     e.mitadAlto  = mitadAlto;
-    e.romboAncho = mitadAncho * 0.85f;
-    e.romboAlto = mitadAlto * 0.60f;
+
+    // El circulo nace del borde inferior de la pantalla: su centro real
+    // (circuloCentroY) queda fuera de vista, en y = -mitadAlto. Solo la
+    // mitad de arriba (el semicirculo) esta en juego.
+    e.circuloCentroY = -mitadAlto;
+    e.circuloRadio = mitadAncho * 0.95f;
+
+    // Punto de cohesion: un poco por debajo de la mitad de la cupula, para
+    // que la manada se reparta por toda la superficie visible sin apilarse
+    // contra el borde plano de abajo.
+    e.cohesionCentroY = e.circuloCentroY + e.circuloRadio * 0.55f;
+
     e.vacas.clear();
     e.vacas.reserve(static_cast<size_t>(n));
 
     // La grilla solo determina una escala dependiente de N. Las posiciones se
-    // generan aparte y de manera uniforme dentro del rombo.
+    // generan aparte y de manera uniforme dentro del semicirculo.
     float aspecto = mitadAncho / mitadAlto;
     int cols = static_cast<int>(
         std::ceil(std::sqrt(static_cast<float>(n) * aspecto)));
@@ -92,13 +80,16 @@ void crearEscena(Escena& e, int n,
 
     for (int i = 0; i < n; ++i) {
         Instancia ins;
-        // La transformacion (u + v - 1, u - v), con u y v uniformes en
-        // [0, 1), distribuye puntos uniformemente dentro del rombo unidad.
-        // El margen evita que varias vacas nazcan pegadas a los cuatro lados.
-        const float u = rng.entre(0.0f, 1.0f);
-        const float v = rng.entre(0.0f, 1.0f);
-        ins.x = (u + v - 1.0f) * e.romboAncho * MARGEN_INICIAL_ROMBO;
-        ins.y = (u - v) * e.romboAlto * MARGEN_INICIAL_ROMBO;
+        // Muestreo uniforme dentro del semicirculo: radio = R*sqrt(u) da una
+        // distribucion de area uniforme dentro de un disco (sin el sqrt, los
+        // puntos se amontonarian cerca del centro); restringir el angulo a
+        // [0, pi] deja solo la mitad de arriba. El margen evita que las
+        // vacas nazcan pegadas al borde curvo.
+        const float radioMuestra = e.circuloRadio * MARGEN_INICIAL_CIRCULO *
+            std::sqrt(rng.entre(0.0f, 1.0f));
+        const float anguloMuestra = rng.entre(0.0f, PI);
+        ins.x = radioMuestra * std::cos(anguloMuestra);
+        ins.y = e.circuloCentroY + radioMuestra * std::sin(anguloMuestra);
 
         ins.giro    = rng.entre(0.0f, 360.0f);
         ins.velGiro = rng.entre(20.0f, 70.0f) * (rng.entre(0.0f, 1.0f) < 0.5f ? -1.0f : 1.0f);
@@ -114,6 +105,15 @@ void crearEscena(Escena& e, int n,
 
         e.vacas.push_back(ins);
     }
+
+    // Buffers de la pasada O(N^2): se reservan una sola vez aqui, no en cada
+    // frame de actualizarEscena.
+    e.ax.assign(e.vacas.size(), 0.0f);
+    e.ay.assign(e.vacas.size(), 0.0f);
+
+    e.ovni = Ovni();
+    e.ovni.x = 0.0f;
+    e.ovni.y = e.cohesionCentroY;
 
     constexpr int NUM_PLANETAS = 4;
     e.planetas.clear();
@@ -131,7 +131,7 @@ void crearEscena(Escena& e, int n,
         float velocidadGiro;
         bool tieneAro;
         float inclinacionAro;
-        float rotacionAro;
+        float anguloAroInicial;
     };
 
     // A la profundidad usada por el renderer el area visible es mayor que en
@@ -150,70 +150,215 @@ void crearEscena(Escena& e, int n,
 
     for (int i = 0; i < NUM_PLANETAS; ++i) {
         const ConfiguracionPlaneta& config = configuraciones[i];
-        Planeta p;
-        p.x = mitadAncho * config.factorX;
-        p.y = mitadAlto * config.factorY;
-        p.escala = config.escala;
-        p.r = config.r;
-        p.g = config.g;
-        p.b = config.b;
-        p.textura = i;
-        p.vx = config.velocidadX;
-        p.giro = config.giroInicial;
-        p.velGiro = config.velocidadGiro;
-        p.tieneAro = config.tieneAro;
-        p.inclinacionAro = config.inclinacionAro;
-        p.rotacionAro = config.rotacionAro;
-        e.planetas.push_back(p);
+        Planeta planeta;
+        planeta.x = mitadAncho * config.factorX;
+        planeta.y = mitadAlto * config.factorY;
+        planeta.escala = config.escala;
+        planeta.r = config.r;
+        planeta.g = config.g;
+        planeta.b = config.b;
+        planeta.textura = i;
+        planeta.vx = config.velocidadX;
+        planeta.giro = config.giroInicial;
+        planeta.velGiro = config.velocidadGiro;
+        planeta.tieneAro = config.tieneAro;
+        planeta.inclinacionAro = config.inclinacionAro;
+        planeta.anguloAroInicial = config.anguloAroInicial;
+        e.planetas.push_back(planeta);
     }
 }
 
-void actualizarEscena(Escena& e, float dt) {
-    // Lazo independiente por instancia: este es el candidato natural para
-    // '#pragma omp parallel for' en la version paralela.
-    for (size_t i = 0; i < e.vacas.size(); ++i) {
-        Instancia& v = e.vacas[i];
+void actualizarEscena(Escena& e, float dt,
+                      double* msPasadaA, double* msPasadaB) {
+    const long cantidadVacas = static_cast<long>(e.vacas.size());
 
-        v.giro += v.velGiro * dt;
-        if (v.giro >= 360.0f) v.giro -= 360.0f;
-        if (v.giro < 0.0f)    v.giro += 360.0f;
+    // El OVNI recorre una trayectoria de Lissajous sobre la cupula. Es O(1)
+    // por frame: no compite por tiempo con la parte que se mide.
+    Ovni& ovni = e.ovni;
+    ovni.fase += dt;
+    ovni.giro += ovni.velGiro * dt;
+    if (ovni.giro >= 360.0f) ovni.giro -= 360.0f;
+    if (ovni.giro < 0.0f)    ovni.giro += 360.0f;
 
-        v.x += v.vx * dt;
-        v.y += v.vy * dt;
+    constexpr float FRECUENCIA_X = 0.55f;
+    constexpr float FRECUENCIA_Y = 0.35f;
+    constexpr float DESFASE_Y = 1.3f;
+    // Franja vertical comoda dentro de la cupula (no llega al borde plano de
+    // abajo ni se acerca demasiado a la cima).
+    const float amplitudX = e.circuloRadio * 0.75f;
+    const float amplitudY = e.circuloRadio * 0.28f;
+    ovni.x = amplitudX * std::sin(ovni.fase * FRECUENCIA_X);
+    ovni.y = e.cohesionCentroY +
+             amplitudY * std::sin(ovni.fase * FRECUENCIA_Y + DESFASE_Y);
 
-        const float a = e.romboAncho;
-        const float b = e.romboAlto;
+    // ---------------------------------------------------------------------
+    // Pasada A: interaccion entre vacas. O(N^2) e intencionalmente sin
+    // estructura espacial (grilla/BVH) que la reduzca: es el kernel
+    // compute-bound del proyecto, pensado para escalar con los hilos.
+    //
+    // Cada iteracion i SOLO LEE el arreglo de vacas y escribe unicamente en
+    // ax[i]/ay[i]. No hay dependencias entre iteraciones, asi que el
+    // resultado es identico sin importar cuantos hilos lo ejecuten: eso es
+    // lo que permite comparar una corrida con --hilos 1 contra --hilos N
+    // y esperar exactamente la misma escena (vease --dump-estado).
+    // ---------------------------------------------------------------------
+    const float radioSeparacionAlCuadrado =
+        e.radioSeparacion * e.radioSeparacion;
 
-        // Ecuacion del rombo: |x| / a + |y| / b <= 1.
-        const float distanciaRombo =
-            std::fabs(v.x) / a +
-            std::fabs(v.y) / b;
+    // Distancia de la vaca que mas se acerco al OVNI en este frame. No hay
+    // fuerza de huida (se quito): esto solo demuestra una reduccion dentro
+    // de la misma pasada O(N^2), sin empujar a nadie -- cada hilo lleva su
+    // propio minimo parcial y OpenMP los combina al salir del lazo.
+    float distanciaMinimaOvni = 1e9f;
 
-        if (distanciaRombo > 1.0f) {
-            float nx = signoLado(v.x, v.vx) / a;
-            float ny = signoLado(v.y, v.vy) / b;
+    const auto inicioA = std::chrono::steady_clock::now();
+#ifdef _OPENMP
+#pragma omp parallel for schedule(runtime) reduction(min:distanciaMinimaOvni)
+#endif
+    for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
+        const Instancia& vacaActual = e.vacas[static_cast<size_t>(indiceVaca)];
+        float aceleracionX = 0.0f;
+        float aceleracionY = 0.0f;
 
-            // Normal unitaria hacia afuera del lado alcanzado.
-            const float longitud = std::sqrt(nx * nx + ny * ny);
-            nx /= longitud;
-            ny /= longitud;
+        for (long indiceVecina = 0; indiceVecina < cantidadVacas;
+             ++indiceVecina) {
+            if (indiceVecina == indiceVaca) continue;
+            const Instancia& vacaVecina =
+                e.vacas[static_cast<size_t>(indiceVecina)];
 
-            const float producto = v.vx * nx + v.vy * ny;
+            // Vector de la vecina hacia la vaca actual: si estan mas cerca
+            // que radioSeparacion, empuja a vacaActual en esta direccion
+            // (alejandola de vacaVecina).
+            const float diferenciaX = vacaActual.x - vacaVecina.x;
+            const float diferenciaY = vacaActual.y - vacaVecina.y;
+            const float distanciaAlCuadrado =
+                diferenciaX * diferenciaX + diferenciaY * diferenciaY;
+            if (distanciaAlCuadrado < radioSeparacionAlCuadrado &&
+                distanciaAlCuadrado > 1e-8f) {
+                const float distancia = std::sqrt(distanciaAlCuadrado);
+                const float fuerza = e.fuerzaSeparacion *
+                    (e.radioSeparacion - distancia) / e.radioSeparacion;
+                aceleracionX += (diferenciaX / distancia) * fuerza;
+                aceleracionY += (diferenciaY / distancia) * fuerza;
+            }
+        }
+
+        // Distancia al OVNI, solo para alimentar el MIN del HUD (ver el
+        // comentario de distanciaMinimaOvni arriba). No aplica ninguna
+        // fuerza sobre la vaca.
+        const float diferenciaXOvni = vacaActual.x - ovni.x;
+        const float diferenciaYOvni = vacaActual.y - ovni.y;
+        const float distanciaAlOvni = std::sqrt(
+            diferenciaXOvni * diferenciaXOvni + diferenciaYOvni * diferenciaYOvni);
+        if (distanciaAlOvni < distanciaMinimaOvni) {
+            distanciaMinimaOvni = distanciaAlOvni;
+        }
+
+        e.ax[static_cast<size_t>(indiceVaca)] = aceleracionX;
+        e.ay[static_cast<size_t>(indiceVaca)] = aceleracionY;
+    }
+
+    e.distanciaMinimaOvni = distanciaMinimaOvni;
+    if (msPasadaA) {
+        *msPasadaA = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - inicioA).count();
+    }
+
+    // ---------------------------------------------------------------------
+    // Pasada B: integracion. O(N): cada vaca solo lee/escribe su propio
+    // estado (incluida la aceleracion que dejo la pasada A), asi que tambien
+    // es trivialmente paralela, pero trae poco calculo por cada acceso a
+    // memoria (memory-bound) y su speedup se aplana mucho antes que el de
+    // la pasada A. Es tambien donde se ve el efecto de false sharing con
+    // schedule(static, 1): Instancia mide 40 bytes, asi que dos vacas
+    // consecutivas caen casi siempre en la misma linea de cache de 64.
+    // ---------------------------------------------------------------------
+    const auto inicioB = std::chrono::steady_clock::now();
+#ifdef _OPENMP
+#pragma omp parallel for schedule(runtime)
+#endif
+    for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
+        Instancia& vaca = e.vacas[static_cast<size_t>(indiceVaca)];
+
+        // Cohesion: jaloncito hacia cohesionCentroY (un punto comodo dentro
+        // de la cupula, no el centro real del circulo, que queda fuera de
+        // pantalla), proporcional a que tan lejos esta la vaca de ese punto
+        // en relacion al radio de la plataforma. Es la unica fuerza no
+        // repulsiva del modelo: sin ella, la separacion solo empuja hacia
+        // afuera y la manada termina amontonada contra el borde.
+        const float aceleracionCohesionX =
+            -e.fuerzaCohesion * (vaca.x / e.circuloRadio);
+        const float aceleracionCohesionY = -e.fuerzaCohesion *
+            ((vaca.y - e.cohesionCentroY) / e.circuloRadio);
+
+        vaca.vx += (e.ax[static_cast<size_t>(indiceVaca)] +
+                    aceleracionCohesionX) * dt;
+        vaca.vy += (e.ay[static_cast<size_t>(indiceVaca)] +
+                    aceleracionCohesionY) * dt;
+
+        const float rapidez = std::sqrt(vaca.vx * vaca.vx + vaca.vy * vaca.vy);
+        if (rapidez > e.rapidezMax) {
+            const float ajusteRapidez = e.rapidezMax / rapidez;
+            vaca.vx *= ajusteRapidez;
+            vaca.vy *= ajusteRapidez;
+        }
+
+        vaca.giro += vaca.velGiro * dt;
+        if (vaca.giro >= 360.0f) vaca.giro -= 360.0f;
+        if (vaca.giro < 0.0f)    vaca.giro += 360.0f;
+
+        vaca.x += vaca.vx * dt;
+        vaca.y += vaca.vy * dt;
+
+        // Borde curvo: circulo centrado en (0, circuloCentroY). A diferencia
+        // del rombo (ver docs/matematica_rebote_rombo.md, que sigue
+        // aplicando para la formula de reflexion v' = v - 2(v.n)n), la
+        // normal de un circulo es simplemente la direccion radial -- no
+        // hace falta un caso especial por cuadrante como con signoLado.
+        const float diferenciaCentroX = vaca.x;
+        const float diferenciaCentroY = vaca.y - e.circuloCentroY;
+        const float distanciaAlCentroAlCuadrado =
+            diferenciaCentroX * diferenciaCentroX +
+            diferenciaCentroY * diferenciaCentroY;
+
+        if (distanciaAlCentroAlCuadrado >
+            e.circuloRadio * e.circuloRadio) {
+            const float distanciaAlCentro =
+                std::sqrt(distanciaAlCentroAlCuadrado);
+            const float normalX = diferenciaCentroX / distanciaAlCentro;
+            const float normalY = diferenciaCentroY / distanciaAlCentro;
+
+            const float productoPunto = vaca.vx * normalX + vaca.vy * normalY;
 
             // Solo se refleja si la vaca todavia se dirige hacia afuera. La
             // condicion contraria provocaba que se recolocara cada frame sin
             // cambiar su trayectoria, produciendo vibracion en los bordes.
-            if (producto > 0.0f) {
-                v.vx -= 2.0f * producto * nx;
-                v.vy -= 2.0f * producto * ny;
+            if (productoPunto > 0.0f) {
+                vaca.vx -= 2.0f * productoPunto * normalX;
+                vaca.vy -= 2.0f * productoPunto * normalY;
             }
 
             // Proyeccion radial a un punto apenas interior. El margen evita
             // detectar de nuevo el mismo choque por error de punto flotante.
-            const float ajuste = MARGEN_REBOTE_ROMBO / distanciaRombo;
-            v.x *= ajuste;
-            v.y *= ajuste;
+            const float ajustePosicion =
+                (e.circuloRadio * MARGEN_REBOTE_CIRCULO) / distanciaAlCentro;
+            vaca.x = diferenciaCentroX * ajustePosicion;
+            vaca.y = e.circuloCentroY + diferenciaCentroY * ajustePosicion;
         }
+
+        // Borde plano de abajo: el diametro del circulo, apoyado justo en
+        // el borde inferior de la pantalla. La vaca nunca cruza a la mitad
+        // de abajo (que ni siquiera se dibuja) -- rebote elastico simple
+        // contra una linea horizontal.
+        if (vaca.y < e.circuloCentroY) {
+            if (vaca.vy < 0.0f) vaca.vy = -vaca.vy;
+            vaca.y = e.circuloCentroY;
+        }
+    }
+
+    if (msPasadaB) {
+        *msPasadaB = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - inicioB).count();
     }
 
     // Los planetas recorren carriles horizontales detras de la plataforma.

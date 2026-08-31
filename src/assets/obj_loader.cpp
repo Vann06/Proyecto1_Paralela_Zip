@@ -22,11 +22,16 @@ Vec3 cruz(const Vec3& a, const Vec3& b) {
 }
 
 // Una esquina de triangulo: indices a posicion / uv / normal.
-struct Corner { int v = -1, t = -1, n = -1; };
+struct Corner {
+    int indicePosicion = -1;
+    int indiceUV = -1;
+    int indiceNormal = -1;
+};
 
 // Parsea un token de cara: "12", "12/7", "12//4", "12/7/4".
 // Los campos ausentes quedan en 0.
-void parseCorner(const std::string& tok, int& vi, int& ti, int& ni) {
+void parseCorner(const std::string& tok, int& indicePosicion, int& indiceUV,
+                  int& indiceNormal) {
     int vals[3] = { 0, 0, 0 };
     const char* p = tok.c_str();
     int slot = 0;
@@ -40,9 +45,9 @@ void parseCorner(const std::string& tok, int& vi, int& ti, int& ni) {
         else break;
     }
 
-    vi = vals[0];
-    ti = vals[1];
-    ni = vals[2];
+    indicePosicion = vals[0];
+    indiceUV = vals[1];
+    indiceNormal = vals[2];
 }
 
 // OBJ usa indices base 1. Los negativos son relativos al final del arreglo.
@@ -53,27 +58,32 @@ int resolver(int idx, size_t total) {
 }
 
 // Centra el modelo en el origen y lo escala a la dimension pedida.
-void normalizarEscala(std::vector<Vec3>& V, float objetivo) {
-    if (V.empty()) return;
+void normalizarEscala(std::vector<Vec3>& posiciones, float objetivo) {
+    if (posiciones.empty()) return;
 
-    Vec3 mn = V[0], mx = V[0];
-    for (const Vec3& p : V) {
-        mn.x = std::fmin(mn.x, p.x);  mx.x = std::fmax(mx.x, p.x);
-        mn.y = std::fmin(mn.y, p.y);  mx.y = std::fmax(mx.y, p.y);
-        mn.z = std::fmin(mn.z, p.z);  mx.z = std::fmax(mx.z, p.z);
+    Vec3 minimo = posiciones[0], maximo = posiciones[0];
+    for (const Vec3& punto : posiciones) {
+        minimo.x = std::fmin(minimo.x, punto.x);
+        maximo.x = std::fmax(maximo.x, punto.x);
+        minimo.y = std::fmin(minimo.y, punto.y);
+        maximo.y = std::fmax(maximo.y, punto.y);
+        minimo.z = std::fmin(minimo.z, punto.z);
+        maximo.z = std::fmax(maximo.z, punto.z);
     }
 
-    Vec3 centro = { (mn.x + mx.x) * 0.5f,
-                    (mn.y + mx.y) * 0.5f,
-                    (mn.z + mx.z) * 0.5f };
+    Vec3 centro = { (minimo.x + maximo.x) * 0.5f,
+                    (minimo.y + maximo.y) * 0.5f,
+                    (minimo.z + maximo.z) * 0.5f };
 
-    float ext = std::fmax(mx.x - mn.x, std::fmax(mx.y - mn.y, mx.z - mn.z));
-    float esc = (ext > 1e-8f) ? (objetivo / ext) : 1.0f;
+    float extension = std::fmax(maximo.x - minimo.x,
+                                std::fmax(maximo.y - minimo.y,
+                                          maximo.z - minimo.z));
+    float escala = (extension > 1e-8f) ? (objetivo / extension) : 1.0f;
 
-    for (Vec3& p : V) {
-        p.x = (p.x - centro.x) * esc;
-        p.y = (p.y - centro.y) * esc;
-        p.z = (p.z - centro.z) * esc;
+    for (Vec3& punto : posiciones) {
+        punto.x = (punto.x - centro.x) * escala;
+        punto.y = (punto.y - centro.y) * escala;
+        punto.z = (punto.z - centro.z) * escala;
     }
 }
 
@@ -81,26 +91,36 @@ void normalizarEscala(std::vector<Vec3>& V, float objetivo) {
 // La normal de cara NO se normaliza antes de acumular: su magnitud es el
 // doble del area del triangulo, asi las caras grandes pesan mas y el
 // sombreado queda mejor.
-std::vector<Vec3> calcularNormalesSuaves(const std::vector<Vec3>& V,
+std::vector<Vec3> calcularNormalesSuaves(const std::vector<Vec3>& posiciones,
                                          const std::vector<Corner>& tris) {
-    std::vector<Vec3> suaves(V.size());
+    std::vector<Vec3> suaves(posiciones.size());
 
     for (size_t i = 0; i + 2 < tris.size(); i += 3) {
-        const Vec3& a = V[tris[i    ].v];
-        const Vec3& b = V[tris[i + 1].v];
-        const Vec3& c = V[tris[i + 2].v];
-        Vec3 fn = cruz(resta(b, a), resta(c, a));
+        const Vec3& verticeA = posiciones[tris[i    ].indicePosicion];
+        const Vec3& verticeB = posiciones[tris[i + 1].indicePosicion];
+        const Vec3& verticeC = posiciones[tris[i + 2].indicePosicion];
+        Vec3 normalDeCara = cruz(resta(verticeB, verticeA),
+                                 resta(verticeC, verticeA));
 
-        for (int k = 0; k < 3; ++k) {
-            Vec3& d = suaves[tris[i + k].v];
-            d.x += fn.x;  d.y += fn.y;  d.z += fn.z;
+        for (int indiceEsquina = 0; indiceEsquina < 3; ++indiceEsquina) {
+            Vec3& normalAcumulada =
+                suaves[tris[i + indiceEsquina].indicePosicion];
+            normalAcumulada.x += normalDeCara.x;
+            normalAcumulada.y += normalDeCara.y;
+            normalAcumulada.z += normalDeCara.z;
         }
     }
 
-    for (Vec3& n : suaves) {
-        float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-        if (len > 1e-8f) { n.x /= len;  n.y /= len;  n.z /= len; }
-        else             { n = { 0.0f, 1.0f, 0.0f }; }
+    for (Vec3& normal : suaves) {
+        float longitud = std::sqrt(
+            normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+        if (longitud > 1e-8f) {
+            normal.x /= longitud;
+            normal.y /= longitud;
+            normal.z /= longitud;
+        } else {
+            normal = { 0.0f, 1.0f, 0.0f };
+        }
     }
 
     return suaves;
@@ -121,16 +141,16 @@ bool cargarOBJ(const std::string& ruta,
                const OpcionesOBJ& opts,
                std::string* error) {
 
-    std::ifstream f(ruta);
-    if (!f) return fallar(error, "No se pudo abrir el archivo: " + ruta);
+    std::ifstream archivo(ruta);
+    if (!archivo) return fallar(error, "No se pudo abrir el archivo: " + ruta);
 
-    std::vector<Vec3>   V;    // posiciones
-    std::vector<Vec3>   N;    // normales del archivo
-    std::vector<float>  T;    // uv, 2 floats por entrada
-    std::vector<Corner> tris; // 3 corners por triangulo
+    std::vector<Vec3>   posiciones;      // posiciones ("v") leidas del archivo
+    std::vector<Vec3>   normalesArchivo; // normales ("vn") leidas del archivo
+    std::vector<float>  coordenadasUV;   // uv ("vt"), 2 floats por entrada
+    std::vector<Corner> tris;            // 3 corners por triangulo
 
     std::string linea;
-    while (std::getline(f, linea)) {
+    while (std::getline(archivo, linea)) {
         // Archivos guardados en Windows traen '\r' al final de cada linea.
         if (!linea.empty() && linea.back() == '\r') linea.pop_back();
         if (linea.empty() || linea[0] == '#') continue;
@@ -140,56 +160,67 @@ bool cargarOBJ(const std::string& ruta,
         ss >> tipo;
 
         if (tipo == "v") {
-            Vec3 p;
-            ss >> p.x >> p.y >> p.z;
-            V.push_back(p);
+            Vec3 punto;
+            ss >> punto.x >> punto.y >> punto.z;
+            posiciones.push_back(punto);
         }
         else if (tipo == "vn") {
-            Vec3 p;
-            ss >> p.x >> p.y >> p.z;
-            N.push_back(p);
+            Vec3 punto;
+            ss >> punto.x >> punto.y >> punto.z;
+            normalesArchivo.push_back(punto);
         }
         else if (tipo == "vt") {
             float u = 0.0f, v = 0.0f;
             ss >> u >> v;
-            T.push_back(u);
-            T.push_back(v);
+            coordenadasUV.push_back(u);
+            coordenadasUV.push_back(v);
         }
         else if (tipo == "f") {
             // Una cara puede tener 3, 4 o mas vertices.
             std::vector<Corner> poly;
             std::string tok;
             while (ss >> tok) {
-                int a, b, c;
-                parseCorner(tok, a, b, c);
-                Corner e;
-                e.v = resolver(a, V.size());
-                e.t = resolver(b, T.size() / 2);
-                e.n = resolver(c, N.size());
-                if (e.v >= 0 && e.v < static_cast<int>(V.size()))
-                    poly.push_back(e);
+                int indiceCrudoPosicion = 0;
+                int indiceCrudoUV = 0;
+                int indiceCrudoNormal = 0;
+                parseCorner(tok, indiceCrudoPosicion, indiceCrudoUV,
+                            indiceCrudoNormal);
+                Corner esquina;
+                esquina.indicePosicion =
+                    resolver(indiceCrudoPosicion, posiciones.size());
+                esquina.indiceUV =
+                    resolver(indiceCrudoUV, coordenadasUV.size() / 2);
+                esquina.indiceNormal =
+                    resolver(indiceCrudoNormal, normalesArchivo.size());
+                if (esquina.indicePosicion >= 0 &&
+                    esquina.indicePosicion < static_cast<int>(posiciones.size()))
+                    poly.push_back(esquina);
             }
             // Triangulacion en abanico: (0,1,2), (0,2,3), (0,3,4)...
             // Correcto para poligonos convexos, que es el caso normal.
-            for (size_t k = 1; k + 1 < poly.size(); ++k) {
+            for (size_t indiceAbanico = 1; indiceAbanico + 1 < poly.size();
+                 ++indiceAbanico) {
                 tris.push_back(poly[0]);
-                tris.push_back(poly[k]);
-                tris.push_back(poly[k + 1]);
+                tris.push_back(poly[indiceAbanico]);
+                tris.push_back(poly[indiceAbanico + 1]);
             }
         }
         // mtllib, usemtl, o, g, s: ignorados a proposito
     }
 
-    if (V.empty())    return fallar(error, "El archivo no tiene vertices (v)");
+    if (posiciones.empty()) {
+        return fallar(error, "El archivo no tiene vertices (v)");
+    }
     if (tris.empty()) return fallar(error, "El archivo no tiene caras (f)");
 
-    if (opts.normalizar) normalizarEscala(V, opts.tamanoObjetivo);
+    if (opts.normalizar) normalizarEscala(posiciones, opts.tamanoObjetivo);
 
     // Usar las normales del archivo solo si estan completas.
-    bool faltanNormales = N.empty();
+    bool faltanNormales = normalesArchivo.empty();
     if (!faltanNormales) {
-        for (const Corner& c : tris) {
-            if (c.n < 0 || c.n >= static_cast<int>(N.size())) {
+        for (const Corner& esquina : tris) {
+            if (esquina.indiceNormal < 0 ||
+                esquina.indiceNormal >= static_cast<int>(normalesArchivo.size())) {
                 faltanNormales = true;
                 break;
             }
@@ -197,13 +228,13 @@ bool cargarOBJ(const std::string& ruta,
     }
 
     std::vector<Vec3> suaves;
-    if (faltanNormales) suaves = calcularNormalesSuaves(V, tris);
+    if (faltanNormales) suaves = calcularNormalesSuaves(posiciones, tris);
 
     // Aplanar a arrays contiguos, de-indexando.
-    out.tieneUV     = !T.empty();
+    out.tieneUV     = !coordenadasUV.empty();
     out.normalesGen = faltanNormales;
     out.triangulos  = static_cast<int>(tris.size()) / 3;
-    out.verticesRaw = static_cast<int>(V.size());
+    out.verticesRaw = static_cast<int>(posiciones.size());
 
     out.pos.clear();
     out.nrm.clear();
@@ -212,21 +243,25 @@ bool cargarOBJ(const std::string& ruta,
     out.nrm.reserve(tris.size() * 3);
     if (out.tieneUV) out.uv.reserve(tris.size() * 2);
 
-    for (const Corner& c : tris) {
-        const Vec3& p = V[c.v];
-        out.pos.push_back(p.x);
-        out.pos.push_back(p.y);
-        out.pos.push_back(p.z);
+    for (const Corner& esquina : tris) {
+        const Vec3& punto = posiciones[esquina.indicePosicion];
+        out.pos.push_back(punto.x);
+        out.pos.push_back(punto.y);
+        out.pos.push_back(punto.z);
 
-        Vec3 n = (!faltanNormales && c.n >= 0) ? N[c.n] : suaves[c.v];
-        out.nrm.push_back(n.x);
-        out.nrm.push_back(n.y);
-        out.nrm.push_back(n.z);
+        Vec3 normal = (!faltanNormales && esquina.indiceNormal >= 0)
+            ? normalesArchivo[esquina.indiceNormal]
+            : suaves[esquina.indicePosicion];
+        out.nrm.push_back(normal.x);
+        out.nrm.push_back(normal.y);
+        out.nrm.push_back(normal.z);
 
         if (out.tieneUV) {
-            if (c.t >= 0 && static_cast<size_t>(c.t * 2 + 1) < T.size()) {
-                out.uv.push_back(T[c.t * 2]);
-                out.uv.push_back(T[c.t * 2 + 1]);
+            if (esquina.indiceUV >= 0 &&
+                static_cast<size_t>(esquina.indiceUV * 2 + 1) <
+                    coordenadasUV.size()) {
+                out.uv.push_back(coordenadasUV[esquina.indiceUV * 2]);
+                out.uv.push_back(coordenadasUV[esquina.indiceUV * 2 + 1]);
             } else {
                 out.uv.push_back(0.0f);
                 out.uv.push_back(0.0f);
