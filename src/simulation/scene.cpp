@@ -80,11 +80,8 @@ void crearEscena(Escena& e, int n,
 
     for (int i = 0; i < n; ++i) {
         Instancia ins;
-        // Muestreo uniforme dentro del semicirculo: radio = R*sqrt(u) da una
-        // distribucion de area uniforme dentro de un disco (sin el sqrt, los
-        // puntos se amontonarian cerca del centro); restringir el angulo a
-        // [0, pi] deja solo la mitad de arriba. El margen evita que las
-        // vacas nazcan pegadas al borde curvo.
+        // radio = R*sqrt(u) da distribucion uniforme dentro de un disco;
+        // el angulo en [0, pi] deja solo la mitad de arriba (el semicirculo).
         const float radioMuestra = e.circuloRadio * MARGEN_INICIAL_CIRCULO *
             std::sqrt(rng.entre(0.0f, 1.0f));
         const float anguloMuestra = rng.entre(0.0f, PI);
@@ -191,24 +188,14 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
     ovni.y = e.cohesionCentroY +
              amplitudY * std::sin(ovni.fase * FRECUENCIA_Y + DESFASE_Y);
 
-    // ---------------------------------------------------------------------
-    // Pasada A: interaccion entre vacas. O(N^2) e intencionalmente sin
-    // estructura espacial (grilla/BVH) que la reduzca: es el kernel
-    // compute-bound del proyecto, pensado para escalar con los hilos.
-    //
-    // Cada iteracion i SOLO LEE el arreglo de vacas y escribe unicamente en
-    // ax[i]/ay[i]. No hay dependencias entre iteraciones, asi que el
-    // resultado es identico sin importar cuantos hilos lo ejecuten: eso es
-    // lo que permite comparar una corrida con --hilos 1 contra --hilos N
-    // y esperar exactamente la misma escena (vease --dump-estado).
-    // ---------------------------------------------------------------------
+    // Pasada A: cada vaca compara contra todas las demas (O(N^2), compute-bound).
+    // Solo lee el arreglo de vacas y escribe su propio ax[i]/ay[i]: sin
+    // dependencias entre iteraciones, el resultado es el mismo con 1 o N hilos.
     const float radioSeparacionAlCuadrado =
         e.radioSeparacion * e.radioSeparacion;
 
-    // Distancia de la vaca que mas se acerco al OVNI en este frame. No hay
-    // fuerza de huida (se quito): esto solo demuestra una reduccion dentro
-    // de la misma pasada O(N^2), sin empujar a nadie -- cada hilo lleva su
-    // propio minimo parcial y OpenMP los combina al salir del lazo.
+    // Minimo global de distancia al OVNI, solo para el HUD (no aplica
+    // fuerza): demuestra una reduccion dentro de esta misma pasada.
     float distanciaMinimaOvni = 1e9f;
 
     const auto inicioA = std::chrono::steady_clock::now();
@@ -245,9 +232,7 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
             }
         }
 
-        // Distancia al OVNI, solo para alimentar el MIN del HUD (ver el
-        // comentario de distanciaMinimaOvni arriba). No aplica ninguna
-        // fuerza sobre la vaca.
+        // Distancia al OVNI: solo alimenta el HUD, no aplica fuerza.
         const float diferenciaXOvni = vacaActual.x - ovni.x;
         const float diferenciaYOvni = vacaActual.y - ovni.y;
         const float distanciaAlOvni = std::sqrt(
@@ -266,15 +251,9 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
             std::chrono::steady_clock::now() - inicioA).count();
     }
 
-    // ---------------------------------------------------------------------
-    // Pasada B: integracion. O(N): cada vaca solo lee/escribe su propio
-    // estado (incluida la aceleracion que dejo la pasada A), asi que tambien
-    // es trivialmente paralela, pero trae poco calculo por cada acceso a
-    // memoria (memory-bound) y su speedup se aplana mucho antes que el de
-    // la pasada A. Es tambien donde se ve el efecto de false sharing con
-    // schedule(static, 1): Instancia mide 40 bytes, asi que dos vacas
-    // consecutivas caen casi siempre en la misma linea de cache de 64.
-    // ---------------------------------------------------------------------
+    // Pasada B: cada vaca solo lee/escribe su propio estado (O(N),
+    // memory-bound). Aqui vive el false sharing de schedule(static,1):
+    // Instancia mide 40 bytes, dos vacas consecutivas caen en la misma linea.
     const auto inicioB = std::chrono::steady_clock::now();
 #ifdef _OPENMP
 #pragma omp parallel for if(usarOpenMP) schedule(runtime)
@@ -282,12 +261,9 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
     for (long indiceVaca = 0; indiceVaca < cantidadVacas; ++indiceVaca) {
         Instancia& vaca = e.vacas[static_cast<size_t>(indiceVaca)];
 
-        // Cohesion: jaloncito hacia cohesionCentroY (un punto comodo dentro
-        // de la cupula, no el centro real del circulo, que queda fuera de
-        // pantalla), proporcional a que tan lejos esta la vaca de ese punto
-        // en relacion al radio de la plataforma. Es la unica fuerza no
-        // repulsiva del modelo: sin ella, la separacion solo empuja hacia
-        // afuera y la manada termina amontonada contra el borde.
+        // Cohesion: jaloncito hacia cohesionCentroY, proporcional a la
+        // distancia. Es la unica fuerza no repulsiva; sin ella la separacion
+        // amontonaria a la manada contra el borde.
         const float aceleracionCohesionX =
             -e.fuerzaCohesion * (vaca.x / e.circuloRadio);
         const float aceleracionCohesionY = -e.fuerzaCohesion *
@@ -312,11 +288,8 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
         vaca.x += vaca.vx * dt;
         vaca.y += vaca.vy * dt;
 
-        // Borde curvo: circulo centrado en (0, circuloCentroY). A diferencia
-        // del rombo (ver docs/matematica_rebote_rombo.md, que sigue
-        // aplicando para la formula de reflexion v' = v - 2(v.n)n), la
-        // normal de un circulo es simplemente la direccion radial -- no
-        // hace falta un caso especial por cuadrante como con signoLado.
+        // Borde curvo: normal = direccion radial desde circuloCentroY.
+        // Formula de reflexion v' = v - 2(v.n)n, ver docs/matematica_rebote_rombo.md.
         const float diferenciaCentroX = vaca.x;
         const float diferenciaCentroY = vaca.y - e.circuloCentroY;
         const float distanciaAlCentroAlCuadrado =
@@ -348,10 +321,7 @@ void actualizarEscena(Escena& e, float dt, bool usarOpenMP,
             vaca.y = e.circuloCentroY + diferenciaCentroY * ajustePosicion;
         }
 
-        // Borde plano de abajo: el diametro del circulo, apoyado justo en
-        // el borde inferior de la pantalla. La vaca nunca cruza a la mitad
-        // de abajo (que ni siquiera se dibuja) -- rebote elastico simple
-        // contra una linea horizontal.
+        // Borde plano (diametro del circulo): rebote elastico simple.
         if (vaca.y < e.circuloCentroY) {
             if (vaca.vy < 0.0f) vaca.vy = -vaca.vy;
             vaca.y = e.circuloCentroY;

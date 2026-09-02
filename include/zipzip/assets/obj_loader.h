@@ -4,11 +4,8 @@
 #include <string>
 #include <vector>
 
-// Cargador minimo de archivos Wavefront OBJ.
-//
-// No depende de SDL ni de OpenGL a proposito: solo produce arrays de floats.
-// Quien lo consuma decide que hacer con ellos (subirlos a la GPU, exportarlos,
-// calcular algo, o simplemente probarlos en un test).
+// Cargador minimo de archivos Wavefront OBJ. No depende de SDL ni de
+// OpenGL: solo produce arrays de floats listos para subir a la GPU.
 
 // Malla lista para dibujar: arrays planos, sin indices.
 // Cada triangulo ocupa 3 vertices consecutivos, asi que se puede pasar

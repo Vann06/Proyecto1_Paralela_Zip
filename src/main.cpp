@@ -51,11 +51,8 @@ struct Opciones {
     int hilos = 0;
     std::string schedule = "static";  // static | dynamic | guided
 
-    // Tamano de bloque del schedule. 0 deja que OpenMP use su default (para
-    // 'static', bloques ~N/hilos). Fijarlo en 1 con --schedule static es lo
-    // que expone false sharing entre vacas consecutivas: cada hilo termina
-    // escribiendo en Instancia intercaladas que caen en la misma linea de
-    // cache (Instancia mide 40 bytes, la linea son 64).
+    // Bloque del schedule (0 = default de OpenMP). Con --schedule static y
+    // chunk 1 se expone false sharing: Instancia mide 40 bytes por vaca.
     int chunk = 0;
 
     // Modo sin ventana: corre la simulacion 'frames' veces con dt fijo y
@@ -235,10 +232,8 @@ bool procesarEventos() {
     return true;
 }
 
-// Aplica --hilos y --schedule al entorno de OpenMP y devuelve la cantidad de
-// hilos que realmente quedo activa (1 si el binario se compilo sin OpenMP).
-// El schedule se fija aqui y no en cada pragma para poder compararlo desde
-// la linea de comandos sin recompilar: los pragmas usan schedule(runtime).
+// Configura hilos y schedule de OpenMP (los pragmas usan schedule(runtime)
+// para leerlo). Devuelve los hilos activos (1 si el binario no tiene OpenMP).
 int configurarOpenMP(const Opciones& opciones) {
 #ifdef _OPENMP
     if (opciones.modo == ModoEjecucion::Serial) {
@@ -276,10 +271,8 @@ const char* nombreModo(const Opciones& opciones) {
     return usarOpenMP(opciones) ? "paralelo" : "serial";
 }
 
-// Imprime posicion y velocidad de cada vaca con precision suficiente para
-// diferenciar corridas bit a bit. Con la misma semilla, una corrida con
-// --hilos 1 y otra con --hilos N deben producir exactamente la misma salida;
-// si no coinciden, hay una condicion de carrera en la paralelizacion.
+// Posicion/velocidad de cada vaca, con precision para comparar bit a bit
+// una corrida serial vs. paralela con la misma semilla (--dump-estado).
 void imprimirEstadoDump(const Escena& escena) {
     for (size_t indiceVaca = 0; indiceVaca < escena.vacas.size(); ++indiceVaca) {
         const Instancia& vaca = escena.vacas[indiceVaca];
@@ -288,11 +281,8 @@ void imprimirEstadoDump(const Escena& escena) {
     }
 }
 
-// Modo sin ventana: corre la simulacion 'frames' veces con dt fijo (no el
-// reloj real, para que la corrida sea reproducible) y mide solo el costo de
-// actualizarEscena/actualizarCampoEstrellas. No inicializa SDL ni OpenGL, asi
-// que N puede subir mucho mas alla de lo que el render podria dibujar, que es
-// necesario para que el trabajo por hilo justifique el overhead de OpenMP.
+// Modo sin ventana: corre 'frames' veces con dt fijo (reproducible), sin
+// SDL/OpenGL, para poder subir N sin que el render sea el cuello de botella.
 int ejecutarBench(const Opciones& opciones) {
     constexpr float DT_FIJO = 1.0f / 60.0f;
     constexpr int FRAMES_CALENTAMIENTO = 30;
@@ -320,10 +310,8 @@ int ejecutarBench(const Opciones& opciones) {
                                  estrellasParalelas);
     }
 
-    // Se mide el total y, por separado, cada pasada de actualizarEscena.
-    // Experimentos como false sharing (schedule static,1) viven en la
-    // pasada B (O(N), memory-bound) y quedan diluidos si solo se mira el
-    // total, que la pasada A (O(N^2)) domina en cuanto N crece.
+    // Se mide el total y cada pasada por separado: el false sharing de la
+    // pasada B queda diluido en el total si solo se mira la suma.
     Cronometro cronometroSim;
     Cronometro cronometroPasadaA;
     Cronometro cronometroPasadaB;
@@ -345,18 +333,13 @@ int ejecutarBench(const Opciones& opciones) {
         return 0;
     }
 
-    // Sin render que medir en este modo: la columna existe para que el CSV
-    // tenga la misma forma que un futuro modo con ventana, pero queda en 0.
-    // 'fps' aqui es 1000/ms_sim, es decir cuadros de simulacion por segundo,
-    // no cuadros dibujados.
+    // ms_render queda en 0 (no hay ventana); fps = cuadros de simulacion
+    // por segundo, no cuadros dibujados.
     const double msSimAvg = cronometroSim.promedioMs();
     const double fpsSim = msSimAvg > 0.0 ? 1000.0 / msSimAvg : 0.0;
 
-    // El encabezado va a stderr (no a stdout) para que varias invocaciones
-    // de --bench se puedan concatenar en un solo CSV sin repetirlo; vease
-    // scripts/benchmark.sh, que imprime el encabezado una sola vez.
-    // ms_pasada_a = interaccion O(N^2) entre vacas (compute-bound).
-    // ms_pasada_b = integracion O(N) (memory-bound, aqui vive false sharing).
+    // Encabezado a stderr y fila a stdout, para concatenar varias corridas
+    // de --bench en un CSV sin repetirlo (ver scripts/benchmark.sh).
     std::fprintf(stderr,
         "modo,vacas,estrellas,hilos,estrellas_paralelas,schedule,chunk,"
         "semilla,ms_sim_avg,ms_sim_p95,ms_pasada_a_avg,ms_pasada_b_avg,"

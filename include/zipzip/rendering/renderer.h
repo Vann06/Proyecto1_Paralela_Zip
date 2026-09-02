@@ -33,11 +33,8 @@ private:
     void prepararTexturasPlanetas();
     void prepararEsferaPlaneta();
 
-    // dibujarEstrellas/dibujarPlanetas/dibujarHUD apagan luces, prueba de
-    // profundidad, culling y relleno para dibujar su capa (fondo 2D,
-    // texturas translucidas, overlay ortografico); este metodo repite la
-    // misma restauracion al final de las tres en vez de repetir las 4
-    // lineas cada vez.
+    // Restaura luces/profundidad/culling/relleno tras las capas que los
+    // apagan (estrellas, planetas, HUD), en vez de repetirlo en cada una.
     void restaurarEstadoRender();
 
     void dibujarFondo();

@@ -16,21 +16,13 @@ namespace {
 using zipzip::DIST_CAM;
 using zipzip::PI;
 
-// Inclinacion de la "capa de suelo" (plataforma + vacas + OVNI) sobre el
-// eje X. Sin esto la camara mira el semicirculo de frente y se ve como un
-// abanico plano; con la rotacion, la parte de arriba de la cupula se aleja
-// de la camara y el semicirculo se ve escorzado, como el horizonte de un
-// planeta visto desde un angulo. Se aplica antes de posicionar cada vaca/
-// el OVNI (no despues) para que el giro afecte tambien donde caen, no solo
-// como se ven.
+// Inclina la capa de suelo (plataforma + vacas + OVNI) para que la cupula
+// se vea escorzada, como el horizonte de un planeta, no un abanico plano.
+// Se aplica antes de posicionar cada vaca, asi el giro afecta donde caen.
 constexpr float INCLINACION_SUELO = -55.0f;
 
-// El OVNI esta mas cerca de la camara que las vacas (ver Ovni::z en
-// scene.h), y un objeto cercano exagera visualmente cualquier rotacion
-// heredada por perspectiva -- con la inclinacion completa del suelo se veia
-// mas "acostado" que la plataforma misma. Esta fraccion es cuanto de esa
-// inclinacion conserva su propio cuerpo (el resto se contrarresta en
-// dibujarOvni); su posicion sobre la cupula si seguirla al 100%.
+// El OVNI esta mas cerca de la camara (ver Ovni::z), asi que la inclinacion
+// completa se veia exagerada; esta fraccion es cuanto conserva su cuerpo.
 constexpr float INCLINACION_OVNI_FRACCION = 0.35f;
 
 // Resolucion de la esfera de los planetas (usada al precomputar su
@@ -268,10 +260,8 @@ void Renderer::inicializar() {
     glLightfv(GL_LIGHT0, GL_AMBIENT, ambiente);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, difusa);
 
-    // Las arrays de cliente son una capacidad de OpenGL, no un enlace a un
-    // buffer en particular: se habilitan una vez y cada dibujarX() fija sus
-    // propios punteros justo antes de dibujar, lo que permite alternar entre
-    // varios modelos (vacas, OVNI) en el mismo frame.
+    // Client arrays se habilitan una vez; cada dibujarX() fija sus propios
+    // punteros antes de dibujar, para alternar entre modelos en el mismo frame.
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_NORMAL_ARRAY);
 
@@ -288,19 +278,14 @@ void Renderer::prepararTexturasEscena() {
 }
 
 void Renderer::prepararEsferaPlaneta() {
-    // La misma esfera unitaria sirve para los cuatro planetas (solo cambian
-    // escala, textura y rotacion, que se aplican con glScalef/glRotatef).
-    // Antes esto se recalculaba con seno/coseno para cada planeta en cada
-    // frame; aqui se calcula una sola vez y dibujarPlanetas solo reproduce
-    // los valores guardados.
+    // Una sola esfera unitaria sirve para los 4 planetas (escala/textura/
+    // rotacion se aplican al dibujar); se calcula una sola vez aqui.
     esferaPlaneta_.clear();
     esferaPlaneta_.reserve(static_cast<size_t>(
         SEGMENTOS_ESFERA * LATITUDES_ESFERA * 4 * 5));
 
-    // u/v son las coordenadas de textura (0..1); theta/phi son los angulos
-    // esfericos que u/v generan (longitud y colatitud). No confundir estas
-    // u,v con las de crearEscena en scene.cpp, que son otra cosa (muestras
-    // uniformes para repartir vacas en el rombo).
+    // u/v: coordenadas de textura (0..1); theta/phi: los angulos esfericos
+    // (longitud/colatitud) que generan.
     for (int indiceSegmento = 0; indiceSegmento < SEGMENTOS_ESFERA;
          ++indiceSegmento) {
         const float u1 = static_cast<float>(indiceSegmento) / SEGMENTOS_ESFERA;
@@ -538,30 +523,17 @@ void Renderer::dibujarPlataforma(const Escena& escena) {
     glTranslatef(0.0f, 0.0f, -DIST_CAM);
     glRotatef(INCLINACION_SUELO, 1.0f, 0.0f, 0.0f);
 
-    // Semicirculo apoyado en el borde inferior de la pantalla, como el
-    // horizonte curvo de un pequeño planeta. 'caidaZ' es cuanto se extiende
-    // el borde curvo hacia atras EN PROFUNDIDAD (no en Y) para que la
-    // plataforma se vea como un bloque solido y no como una cascara plana.
-    // Tiene que ser en Z: si se extendiera en Y (como antes), esa franja
-    // cae dentro del mismo rango de Y que ya ocupa el abanico superior para
-    // otros angulos del arco, y despues de INCLINACION_SUELO la falda
-    // termina superponiendose con la cara superior en vez de quedar
-    // escondida detras.
+    // Semicirculo apoyado en el borde inferior, como el horizonte de un
+    // planeta. caidaZ extiende el borde curvo hacia atras EN PROFUNDIDAD
+    // (no en Y), para que la plataforma se vea solida y no como una cascara.
     const float radio = escena.circuloRadio;
     const float centroY = escena.circuloCentroY;
     const float caidaZ = escena.mitadAlto * 0.7f;
 
     constexpr int SEGMENTOS_PLATAFORMA = 48;
 
-    // z = 0 para toda la cara superior: el mismo plano exacto donde
-    // dibujarVacas() coloca a cada vaca (glTranslatef(vaca.x, vaca.y,
-    // 0.0f)). Antes esta funcion le sumaba una profundidad falsa por altura
-    // para simular perspectiva "a mano" -- pero ahora que INCLINACION_SUELO
-    // ya gira de verdad toda la capa de suelo, esa Z extra hacia que el
-    // circulo dibujado ya no fuera el mismo circulo que usa la fisica (ver
-    // circuloRadio/circuloCentroY), y las vacas cerca del borde quedaban
-    // renderizadas fuera de la plataforma. Con z = 0 en los dos, coinciden
-    // exactamente.
+    // z = 0 en toda la cara superior: el mismo plano donde dibujarVacas()
+    // coloca a cada vaca, para que el circulo dibujado coincida con la fisica.
     auto puntoArco = [&](int indice) {
         const float angulo = PI * static_cast<float>(indice) /
                              static_cast<float>(SEGMENTOS_PLATAFORMA);
@@ -652,10 +624,8 @@ void Renderer::dibujarOvni(const Modelo& modeloOvni, const Escena& escena) {
     glTranslatef(0.0f, 0.0f, -DIST_CAM);
     glRotatef(INCLINACION_SUELO, 1.0f, 0.0f, 0.0f);
     glTranslatef(escena.ovni.x, escena.ovni.y, escena.ovni.z);
-    // Contrarresta la mayor parte de la inclinacion heredada: la posicion
-    // ya quedo fijada sobre la cupula inclinada (arriba), pero el cuerpo
-    // del OVNI se dibuja casi de pie -- solo conserva
-    // INCLINACION_OVNI_FRACCION del angulo del suelo.
+    // Contrarresta casi toda la inclinacion heredada: el cuerpo del OVNI
+    // se dibuja casi de pie, con solo INCLINACION_OVNI_FRACCION del angulo.
     glRotatef(-INCLINACION_SUELO * (1.0f - INCLINACION_OVNI_FRACCION),
               1.0f, 0.0f, 0.0f);
     glRotatef(escena.ovni.giro, 0.0f, 1.0f, 0.0f);

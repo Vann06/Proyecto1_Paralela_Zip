@@ -83,7 +83,8 @@ Proyecto1_Paralela_Zip/
 |   |-- benchmark.sh        10 mediciones por configuracion a CSV
 |   `-- resumir_benchmark.py promedios, speedup y eficiencia
 |-- docs/
-|   |-- anexo_01_diagrama_flujo.md
+|   |-- diagrama_flujo_final.md
+|   |-- imprescindibles.md  extracto de los 5 diagramas centrales
 |   |-- anexo_02_catalogo_funciones.md
 |   |-- matematica_rebote_rombo.md
 |   `-- Propuesta Proyecto.pdf
@@ -295,6 +296,6 @@ cuando se usa `--estrellas-paralelas` para realizar el experimento dedicado.
 | Sincronizacion y proteccion de memoria | Reduccion + barreras implicitas + escrituras disjuntas |
 | Historial Git de al menos dos semanas | Cumplido por el historial del repositorio |
 | Informe UVG con 3 fuentes | Pendiente del equipo |
-| Anexo 1: diagrama de flujo final | Implementado en `docs/anexo_01_diagrama_flujo.md`; falta incorporarlo al informe |
+| Anexo 1: diagrama de flujo final | Implementado en `docs/diagrama_flujo_final.md`; falta incorporarlo al informe |
 | Anexo 2: catalogo de funciones | Implementado en `docs/anexo_02_catalogo_funciones.md` |
 | Anexo 3: resultados y capturas reales | Pendiente ejecutar el benchmark completo en el equipo de entrega |

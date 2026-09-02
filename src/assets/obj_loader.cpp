@@ -87,10 +87,8 @@ void normalizarEscala(std::vector<Vec3>& posiciones, float objetivo) {
     }
 }
 
-// Normales suaves por vertice, acumulando las normales de cara adyacentes.
-// La normal de cara NO se normaliza antes de acumular: su magnitud es el
-// doble del area del triangulo, asi las caras grandes pesan mas y el
-// sombreado queda mejor.
+// Normales suaves por vertice, acumulando normales de cara adyacentes sin
+// normalizar antes: las caras mas grandes pesan mas y el sombreado mejora.
 std::vector<Vec3> calcularNormalesSuaves(const std::vector<Vec3>& posiciones,
                                          const std::vector<Corner>& tris) {
     std::vector<Vec3> suaves(posiciones.size());

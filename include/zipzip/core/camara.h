@@ -3,13 +3,8 @@
 
 #include <cmath>
 
-// Parametros de la camara compartidos entre el renderer y el modo --bench.
-//
-// El modo --bench no inicializa SDL ni OpenGL (para poder subir la cantidad
-// de elementos sin que el render sea el cuello de botella), pero necesita las
-// mismas dimensiones de escena (mitadAncho/mitadAlto) que ve la ventana real
-// para que la simulacion medida sea la misma. Por eso esta cuenta vive aqui
-// y no como metodo de Renderer.
+// Parametros de camara compartidos por Renderer y el modo --bench (que no
+// inicializa SDL/OpenGL pero necesita las mismas dimensiones de escena).
 
 namespace zipzip {
 

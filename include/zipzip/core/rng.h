@@ -3,16 +3,9 @@
 
 #include <cstdint>
 
-// Generador propio (xorshift32) en lugar de <random>: es determinista entre
-// maquinas y compiladores, asi la misma semilla da siempre la misma escena.
-// Eso importa para comparar tiempos entre la version serial y la paralela, y
-// para verificar con --dump-estado que ambas producen exactamente el mismo
-// resultado.
-//
-// Vivia triplicado: una copia en scene.cpp, otra en starfield.cpp, y una
-// tercera como funciones libres para EstrellaFugaz (que guarda su semilla
-// como campo propio en vez de un Rng completo). Las tres comparten el mismo
-// algoritmo, asi que queda aqui una sola vez.
+// Generador propio (xorshift32) en vez de <random>: determinista entre
+// maquinas y compiladores, asi la misma semilla siempre da la misma escena
+// (clave para comparar serial vs. paralelo con --dump-estado).
 
 namespace zipzip {
 

@@ -6,16 +6,9 @@
 #include <cstddef>
 #include <vector>
 
-// Cronometro de proposito general para medir bloques de codigo en
-// milisegundos. Usa steady_clock (no SDL_GetPerformanceCounter) para que
-// tambien funcione en el modo --bench, que no inicializa SDL.
-//
-// Uso tipico:
-//   Cronometro c;
-//   c.iniciar();
-//   ... trabajo a medir ...
-//   c.detener();          // acumula una muestra
-//   c.promedioMs();        // resumen tras varias muestras
+// Cronometro de proposito general en milisegundos (steady_clock, funciona
+// tambien en --bench sin SDL). iniciar()/detener() acumulan una muestra;
+// promedioMs()/p95Ms() resumen tras varias.
 class Cronometro {
 public:
     void iniciar() {
